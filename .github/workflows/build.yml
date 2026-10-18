@@ -36,6 +36,11 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
+      - name: Sync shared dashboard UI
+        run: |
+          cp shared/ui/dashboard.html apps/windows/src/dashboard.html
+          cp shared/ui/echarts.min.js apps/windows/src/echarts.min.js
+
       - name: Build Windows installer (NSIS)
         run: |
           cd apps/windows

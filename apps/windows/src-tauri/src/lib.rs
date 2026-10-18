@@ -30,7 +30,7 @@ impl Config {
     }
 }
 
-#[derive(Serialize, Clone, Default)]
+#[derive(Serialize, Deserialize, Clone, Default)]
 struct Balance {
     total: String,
     granted: Option<String>,
@@ -318,7 +318,7 @@ pub fn run() {
         .setup(|app| {
             setup_tray(app)?;
             // 悬浮窗定位到主屏右上角
-            if let Some(monitor) = app.primary_monitor() {
+            if let Ok(Some(monitor)) = app.primary_monitor() {
                 let size = monitor.size();
                 let scale = monitor.scale_factor();
                 let w = 340.0 * scale as f64;

@@ -261,8 +261,8 @@ final class FloatingPanel: NSPanel {
         return f
     }()
 
-    // 配置（存 App Group 共享容器）
-    private var displayMode: Int {      // 0=极简（只显示总余额） 1=标准（含赠送/充值）
+    // 配置（存共享目录 config.json）
+    private var displayMode: Int {      // 0=极简（只显示总余额） 1=标准（含赠送/充值） 2=看板（余额+用量曲线）
         get { SharedStore.get("displayMode") as? Int ?? 0 }
         set { SharedStore.set("displayMode", newValue) }
     }
@@ -283,6 +283,7 @@ final class FloatingPanel: NSPanel {
         set { SharedStore.set("alwaysOnTop", newValue) }
     }
     private var isMini: Bool { displayMode == 0 }
+    private var isDashboard: Bool { displayMode == 2 }
 
     // UI 元素（随模式重建）
     private var statusDot: DragView!
@@ -299,9 +300,9 @@ final class FloatingPanel: NSPanel {
     override var canBecomeMain: Bool { false }
 
     init() {
-        let mini = ((SharedStore.get("displayMode") as? Int ?? 0) == 0)
-        let w: CGFloat = mini ? 320 : 340
-        let h: CGFloat = mini ? 100 : 244
+        let mode = SharedStore.get("displayMode") as? Int ?? 0
+        let w: CGFloat = mode == 2 ? 420 : (mode == 0 ? 320 : 340)
+        let h: CGFloat = mode == 2 ? 340 : (mode == 0 ? 100 : 244)
         super.init(contentRect: NSRect(x: 0, y: 0, width: w, height: h),
                    styleMask: [.nonactivatingPanel, .borderless, .fullSizeContentView],
                    backing: .buffered, defer: false)
@@ -331,8 +332,9 @@ final class FloatingPanel: NSPanel {
 
     func applyMode() {
         contentView?.subviews.forEach { $0.removeFromSuperview() }
-        let w: CGFloat = isMini ? 320 : 340
-        let h: CGFloat = isMini ? 100 : 244
+        dashboardWebView = nil
+        let w: CGFloat = isDashboard ? 420 : (isMini ? 320 : 340)
+        let h: CGFloat = isDashboard ? 340 : (isMini ? 100 : 244)
         setContentSize(NSSize(width: w, height: h))
         buildUI()
         positionPanel()
@@ -342,6 +344,10 @@ final class FloatingPanel: NSPanel {
 
     private func buildUI() {
         let content = contentView!
+        if isDashboard {
+            buildDashboardLayout(content)
+            return
+        }
 
         let effect = DragEffectView(frame: content.bounds)
         effect.autoresizingMask = [.width, .height]
@@ -354,6 +360,54 @@ final class FloatingPanel: NSPanel {
         content.addSubview(effect)
 
         isMini ? buildMiniLayout(content) : buildFullLayout(content)
+    }
+
+    // MARK: 看板模式（悬浮窗内嵌 Web 看板：余额 + 用量曲线）
+    private var dashboardWebView: WKWebView?
+
+    private func buildDashboardLayout(_ content: NSView) {
+        // 顶部透明拖动条（WebView 会拦截鼠标，需保留可拖动区域）
+        let dragBar = DragView(frame: NSRect(x: 0, y: content.bounds.height - 26, width: content.bounds.width, height: 26))
+        dragBar.autoresizingMask = [.width, .minYMargin]
+        content.addSubview(dragBar)
+
+        let config = WKWebViewConfiguration()
+        let controller = WKUserContentController()
+        controller.add(self, name: "log")
+        config.userContentController = controller
+        let wv = WKWebView(frame: NSRect(x: 0, y: 0, width: content.bounds.width, height: content.bounds.height - 26),
+                           configuration: config)
+        wv.autoresizingMask = [.width, .height]
+        wv.navigationDelegate = self
+        wv.setValue(false, forKey: "drawsBackground")
+        content.addSubview(wv)
+        dashboardWebView = wv
+
+        // 优先读应用 Resources/dashboard，找不到则回退到源码目录（开发态）
+        var dir = Bundle.main.resourceURL?.appendingPathComponent("dashboard")
+        if dir == nil || !FileManager.default.fileExists(atPath: dir!.path) {
+            let src = NSString(string: "~/Doubao/chats/2026-10-18/new-chat-2/deepseek-usage-app/shared/ui")
+                .expandingTildeInPath
+            if FileManager.default.fileExists(atPath: src) { dir = URL(fileURLWithPath: src) }
+        }
+        if let d = dir {
+            let index = d.appendingPathComponent("dashboard.html")
+            if FileManager.default.fileExists(atPath: index.path) {
+                wv.loadFileURL(index, allowingReadAccessTo: d)
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.injectDashboard() }
+    }
+
+    /// 注入余额历史到看板（幂等，随刷新调用）
+    func injectDashboard() {
+        guard let wv = dashboardWebView else { return }
+        let entries = SharedStore.historyJSON() ?? "[]"
+        let balance = SharedStore.readBalance()
+        let total = balance?["total"] as? String ?? ""
+        let sign = balance?["sign"] as? String ?? "¥"
+        let js = "window.__DS_DATA__ = { sign: \(DashboardWindow.jsStr(sign)), current: \(DashboardWindow.jsStr(total)), entries: \(entries) }; renderDashboard();"
+        wv.evaluateJavaScript(js, completionHandler: nil)
     }
 
     private func buildMiniLayout(_ content: NSView) {
@@ -516,6 +570,23 @@ final class FloatingPanel: NSPanel {
     }
 
     @objc func refresh() {
+        // 看板模式：不触碰原生控件，仅拉数据 + 注入看板
+        if isDashboard {
+            guard let key = SharedStore.apiKey(), !key.isEmpty else { return }
+            guard let base = resolvedBaseURL() else { return }
+            api.fetchBalance(baseURL: base, key: key) { [weak self] result in
+                DispatchQueue.main.async {
+                    guard let self = self else { return }
+                    if case .success(let b) = result {
+                        let sign = Self.currencySign(b.currency)
+                        SharedStore.writeBalance(b, sign: sign)
+                        SharedStore.appendHistory(total: b.total)
+                    }
+                    self.injectDashboard()
+                }
+            }
+            return
+        }
         guard let key = SharedStore.apiKey(), !key.isEmpty else {
             statusDot.layer?.backgroundColor = NSColor.systemOrange.cgColor
             statusLabel.stringValue = "未设置 Key"
@@ -599,14 +670,9 @@ final class FloatingPanel: NSPanel {
             self.interval = SharedStore.get("refreshInterval") as? Int ?? 60
             if self.interval <= 0 { self.interval = 60 }
             self.setAlwaysOnTop(SharedStore.get("alwaysOnTop") as? Bool ?? true)
-            let newMode = SharedStore.get("displayMode") as? Int ?? 0
-            if newMode != self.displayMode {
-                self.displayMode = newMode
-                self.applyMode()
-            } else {
-                self.startTicker()
-                self.refresh()
-            }
+            // save() 已先写 SharedStore 再回调，新旧值已无法区分，故无条件重建
+            self.startTicker()
+            self.applyMode()
         }
         // 独立置顶窗口：不挂 sheet，确保输入框能正常获得焦点、粘贴
         NSApp.activate(ignoringOtherApps: true)
@@ -615,6 +681,18 @@ final class FloatingPanel: NSPanel {
 
     /// 隐藏面板（程序仍常驻菜单栏），点菜单栏图标可随时唤出
     @objc func hidePanel() { orderOut(nil) }
+}
+
+// MARK: - 看板模式 WebView 代理
+extension FloatingPanel: WKNavigationDelegate, WKScriptMessageHandler {
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        injectDashboard()
+    }
+    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        if message.name == "log" {
+            NSLog("PanelJS: \(String(describing: message.body))")
+        }
+    }
 }
 
 // MARK: - 设置面板
@@ -671,6 +749,8 @@ final class SettingsWindow: NSWindow {
         modePopup.lastItem?.tag = 0
         modePopup.addItem(withTitle: "标准 · 含赠送/充值明细")
         modePopup.lastItem?.tag = 1
+        modePopup.addItem(withTitle: "看板 · 余额+用量曲线")
+        modePopup.lastItem?.tag = 2
         modePopup.selectItem(withTag: displayMode)
         if modePopup.selectedTag() == -1 { modePopup.selectItem(withTag: 0) }
         content.addSubview(modePopup)

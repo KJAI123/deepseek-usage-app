@@ -46,6 +46,19 @@
   .card .value.up { color: #4ade80; }
   #chart { flex: 1; min-height: 250px; }
 
+  /* 小尺寸（悬浮窗看板模式 ~420×340）适配 */
+  @media (max-width: 440px) {
+    body { padding: 8px 10px; gap: 6px; }
+    .topbar { flex-wrap: wrap; }
+    .stats { grid-template-columns: repeat(2, 1fr); gap: 6px; }
+    .card { padding: 6px 9px; min-height: 48px; }
+    .card .label { font-size: 10px; margin-bottom: 2px; }
+    .card .value { font-size: 15px; }
+    .btn { padding: 3px 10px; font-size: 11px; }
+    #chart { min-height: 120px; }
+    .cfg-panel { left: 10px; right: 10px; top: 46px; width: auto; }
+  }
+
   .cfg-panel {
     position: fixed; right: 18px; top: 54px;
     width: 236px;

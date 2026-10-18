@@ -14,6 +14,12 @@ struct Config {
     api_key: String,
     base_url: String,
     refresh_interval: u64,
+    #[serde(default = "default_true")]
+    always_on_top: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Config {
@@ -26,6 +32,7 @@ impl Config {
                 self.base_url.trim_end_matches('/').to_string()
             },
             refresh_interval: if self.refresh_interval == 0 { 60 } else { self.refresh_interval },
+            always_on_top: self.always_on_top,
         }
     }
 }
@@ -77,6 +84,15 @@ fn get_config() -> Config {
 
 #[tauri::command]
 fn save_config(cfg: Config) {
+    write_json("config.json", &cfg.normalized());
+}
+
+/// 切换悬浮窗是否始终置顶，并持久化到 config.json
+#[tauri::command]
+fn set_always_on_top(window: tauri::Window, enabled: bool) {
+    let _ = window.set_always_on_top(enabled);
+    let mut cfg: Config = read_json("config.json").unwrap_or_default();
+    cfg.always_on_top = enabled;
     write_json("config.json", &cfg.normalized());
 }
 
@@ -329,11 +345,17 @@ pub fn run() {
                     ));
                 }
             }
+            // 按已保存配置应用置顶状态（默认置顶）
+            let cfg: Config = read_json("config.json").unwrap_or_default();
+            if let Some(win) = app.get_webview_window("main") {
+                let _ = win.set_always_on_top(cfg.always_on_top);
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             get_config,
             save_config,
+            set_always_on_top,
             get_balance_cached,
             get_history,
             refresh,

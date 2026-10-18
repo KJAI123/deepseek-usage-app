@@ -294,8 +294,7 @@ final class FloatingPanel: NSPanel {
         super.init(contentRect: NSRect(x: 0, y: 0, width: w, height: h),
                    styleMask: [.nonactivatingPanel, .borderless, .fullSizeContentView],
                    backing: .buffered, defer: false)
-        isFloatingPanel = true
-        level = alwaysOnTop ? .floating : .normal
+        setAlwaysOnTop(alwaysOnTop)
         isOpaque = false
         backgroundColor = .clear
         hasShadow = true
@@ -312,8 +311,10 @@ final class FloatingPanel: NSPanel {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     // MARK: - 布局构建 / 模式切换
-    /// 设置是否置顶：true → floating 层（始终在最前）；false → normal 层（会被其他窗口遮挡）
+    /// 设置是否置顶：true → floating 层（始终在最前）；false → normal 层（会被其他窗口遮挡）。
+    /// isFloatingPanel 与 level 必须同步，否则 AppKit 会在窗口显示时用 floating 层级覆盖。
     func setAlwaysOnTop(_ on: Bool) {
+        isFloatingPanel = on
         level = on ? .floating : .normal
     }
 
@@ -840,7 +841,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         setupStatusItem()
         let p = FloatingPanel()
         panel = p
+        NSLog("DSAPP launch: panel created, alwaysOnTop=\(SharedStore.get("alwaysOnTop") as? Bool ?? true) level=\(p.level.rawValue)")
         p.orderFrontRegardless()
+        NSLog("DSAPP launch: ordered front, isVisible=\(p.isVisible)")
         p.refresh()
         if (SharedStore.apiKey() ?? "").isEmpty {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak p] in

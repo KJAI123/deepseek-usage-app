@@ -71,6 +71,11 @@
   <input id="base" placeholder="https://your-gateway.example.com">
 </div>
 
+<label style="display:flex; align-items:center; gap:8px; margin-top:14px;">
+  <input id="top" type="checkbox" style="width:auto;" checked>
+  <span>窗口始终置顶</span>
+</label>
+
 <button class="save" id="save">保存</button>
 <div class="hint">余额为账号级（充值+赠送合计）。Key 仅保存在本机 %APPDATA%。</div>
 
@@ -87,6 +92,7 @@
       $("baseWrap").style.display = "block";
     }
     $("interval").value = String(cfg.refresh_interval || 60);
+    $("top").checked = cfg.always_on_top !== false;
   }
 
   $("source").addEventListener("change", () => {
@@ -103,6 +109,7 @@
         refresh_interval: parseInt($("interval").value, 10)
       }
     });
+    await invoke("set_always_on_top", { enabled: $("top").checked });
     window.close();
   });
 

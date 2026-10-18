@@ -59,7 +59,7 @@ Windows 端同样提供透明无边框悬浮窗 + 系统托盘 + 用量看板；
 
 ## 安全与隐私
 
-- API Key **只保存在本机**：macOS 存于受沙盒保护的 App Group 容器与钥匙串；Windows 存于 `%APPDATA%` 本地文件。
+- API Key **只保存在本机**：macOS 存于 `~/Library/Application Support/DeepSeekUsagePanel/config.json` 并同步写钥匙串兜底；Windows 存于 `%APPDATA%/deepseek-usage-app` 本地文件。
 - 应用**不采集、不上传任何数据**，所有请求仅指向你配置的 DeepSeek 官方地址或自建网关。
 - 开源代码，Key 存储方式完全可见，可自行审计。
 

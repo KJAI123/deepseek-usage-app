@@ -12,53 +12,113 @@
     font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
     background: linear-gradient(160deg, #0b1020 0%, #101a33 55%, #0d1b33 100%);
     color: #dbe7ff;
-    padding: 20px 24px;
+    padding: 16px 24px;
     display: flex;
     flex-direction: column;
-    gap: 14px;
+    gap: 12px;
   }
-  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
-  .card {
-    background: rgba(255,255,255,0.05);
-    border: 1px solid rgba(255,255,255,0.08);
-    border-radius: 12px;
-    padding: 12px 14px;
-  }
-  .card .label { font-size: 12px; color: #7d90b8; margin-bottom: 6px; }
-  .card .value { font-size: 22px; font-weight: 700; letter-spacing: 0.5px; color: #4da3ff; }
-  .card .value.warn { color: #ffb04d; }
-  .range { display: flex; gap: 8px; }
+  .topbar { display: flex; align-items: center; gap: 8px; }
+  .range { display: flex; gap: 8px; margin-right: auto; }
   .btn {
     background: rgba(255,255,255,0.06);
     border: 1px solid rgba(255,255,255,0.12);
     color: #aabce0;
     border-radius: 8px;
-    padding: 6px 16px;
-    font-size: 13px;
+    padding: 5px 14px;
+    font-size: 12px;
     cursor: pointer;
     transition: all .15s;
   }
   .btn:hover { background: rgba(255,255,255,0.12); }
   .btn.active { background: #2563eb; border-color: #2563eb; color: #fff; }
-  #chart { flex: 1; min-height: 260px; }
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  .card {
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 12px;
+    padding: 10px 14px;
+    min-height: 64px;
+  }
+  .card .label { font-size: 11px; color: #7d90b8; margin-bottom: 4px; }
+  .card .value { font-size: 21px; font-weight: 700; letter-spacing: 0.5px; color: #4da3ff; }
+  .card .value.bal { color: #4da3ff; }
+  .card .value.use { color: #ffb04d; }
+  .card .value.up { color: #4ade80; }
+  #chart { flex: 1; min-height: 250px; }
+
+  .cfg-panel {
+    position: fixed; right: 18px; top: 54px;
+    width: 236px;
+    background: rgba(16,26,51,0.96);
+    border: 1px solid rgba(255,255,255,0.14);
+    border-radius: 12px;
+    padding: 12px 14px;
+    z-index: 50;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.45);
+  }
+  .cfg-title { font-size: 13px; font-weight: 600; color: #e6efff; margin-bottom: 8px; }
+  .cfg-sec { font-size: 11px; color: #7d90b8; margin: 10px 0 5px; }
+  .cfg-panel label {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 12px; color: #c4d3f0;
+    padding: 3px 0; cursor: pointer;
+  }
+  .cfg-panel input { accent-color: #2563eb; }
+  .cfg-actions { display: flex; gap: 8px; margin-top: 12px; }
+  .cfg-actions .btn { flex: 1; text-align: center; }
+  .cfg-actions .btn.primary { background: #2563eb; border-color: #2563eb; color: #fff; }
+  .mask { position: fixed; inset: 0; z-index: 40; background: transparent; }
 </style>
 </head>
 <body>
-<div class="stats">
-  <div class="card"><div class="label">当前余额</div><div class="value" id="cur">—</div></div>
-  <div class="card"><div class="label">今日消耗</div><div class="value" id="today">—</div></div>
-  <div class="card"><div class="label">记录天数</div><div class="value" id="days">—</div></div>
-  <div class="card"><div class="label">区间最高余额</div><div class="value" id="max">—</div></div>
+<div class="topbar">
+  <div class="range">
+    <button class="btn active" data-range="7">近 7 天</button>
+    <button class="btn" data-range="30">近 30 天</button>
+    <button class="btn" data-range="0">全部</button>
+  </div>
+  <button class="btn" id="cfgBtn">⚙ 自定义显示</button>
 </div>
-<div class="range">
-  <button class="btn active" data-range="7">近 7 天</button>
-  <button class="btn" data-range="30">近 30 天</button>
-  <button class="btn" data-range="0">全部</button>
-</div>
+<div class="stats" id="stats"></div>
 <div id="chart"></div>
 
+<div class="mask" id="mask" hidden></div>
+<div class="cfg-panel" id="cfgPanel" hidden>
+  <div class="cfg-title">自定义显示</div>
+  <div class="cfg-sec">数据卡片（勾选显示）</div>
+  <label><input type="checkbox" data-card="cur"> 当前余额</label>
+  <label><input type="checkbox" data-card="today"> 今日消耗（使用量）</label>
+  <label><input type="checkbox" data-card="cum"> 累计消耗（使用量）</label>
+  <label><input type="checkbox" data-card="topup"> 累计充值</label>
+  <label><input type="checkbox" data-card="days"> 记录天数</label>
+  <label><input type="checkbox" data-card="max"> 区间最高余额</label>
+  <div class="cfg-sec">图表模式</div>
+  <label><input type="radio" name="mode" value="balance"> 余额趋势</label>
+  <label><input type="radio" name="mode" value="usage"> 每日使用量</label>
+  <label><input type="radio" name="mode" value="compare"> 余额 + 使用量对比</label>
+  <div class="cfg-actions">
+    <button class="btn primary" id="cfgSave">保存</button>
+    <button class="btn" id="cfgCancel">取消</button>
+  </div>
+</div>
+
 <script>
+const DEFAULT_CFG = { cards: ["cur","today","cum","days","max"], mode: "balance" };
+const ALL_CARDS = ["cur","today","cum","topup","days","max"];
+
 let range = 7;
+let cfg = loadCfg();
+
+function loadCfg() {
+  try {
+    const raw = localStorage.getItem("ds_dash_cfg");
+    if (raw) { const c = JSON.parse(raw); return Object.assign({}, DEFAULT_CFG, c); }
+  } catch (e) {}
+  return Object.assign({}, DEFAULT_CFG);
+}
+function saveCfg(c) {
+  try { localStorage.setItem("ds_dash_cfg", JSON.stringify(c)); } catch (e) {}
+}
 
 // 转发 console 到宿主（macOS WKWebView 调试用）
 if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.log) {
@@ -90,131 +150,247 @@ function boot() {
   });
 }
 
-function renderDashboard() {
-  const D = window.__DS_DATA__ || { sign: "¥", current: "", entries: [] };
+/* ---------- 用量（消耗）计算 ---------- */
+// 相邻两条余额下降 → 消耗；上升 → 充值/赠送
+function splitUsage(entries) {
+  const sorted = entries.slice().sort((a, b) => a.ts - b.ts);
+  const usage = [];   // {ts, amount}
+  let topup = 0;
+  for (let i = 1; i < sorted.length; i++) {
+    const prev = parseFloat(sorted[i - 1].total) || 0;
+    const cur = parseFloat(sorted[i].total) || 0;
+    const diff = prev - cur;
+    if (diff > 0.001) usage.push({ ts: sorted[i].ts, amount: diff });
+    else if (diff < -0.001) topup += -diff;
+  }
+  return { usage: usage, topup: topup };
+}
+
+function dayKey(ts) {
+  const d = new Date(ts * 1000);
+  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+}
+function usageByDay(usage, maxDays) {
+  const agg = {};
+  const cutoff = maxDays > 0 ? Date.now() / 1000 - maxDays * 86400 : 0;
+  usage.forEach(u => {
+    if (u.ts < cutoff) return;
+    const k = dayKey(u.ts);
+    agg[k] = (agg[k] || 0) + u.amount;
+  });
+  return Object.keys(agg).sort().map(k => ({ day: k, amount: agg[k] }));
+}
+
+/* ---------- 渲染 ---------- */
+function renderCards(D) {
   const entries = (D.entries || []).slice();
+  const sign = D.sign || "¥";
+  const { usage, topup } = splitUsage(entries);
 
-  document.getElementById("cur").textContent = (D.current ? D.sign + D.current : "—");
-
-  // 今日消耗 = 今天首条余额 - 今天最新余额
   const now = new Date();
   const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() / 1000;
   const todayEntries = entries.filter(e => e.ts >= dayStart);
-  const todayEl = document.getElementById("today");
-  todayEl.className = "value";
+  let todayUsage = 0;
   if (todayEntries.length >= 2) {
-    const first = parseFloat(todayEntries[0].total);
-    const last = parseFloat(todayEntries[todayEntries.length - 1].total);
-    const diff = first - last;
-    if (diff > 0.001) {
-      todayEl.textContent = "-" + D.sign + diff.toFixed(2);
-      if (diff >= 20) todayEl.classList.add("warn");
-    } else if (diff < -0.001) {
-      todayEl.textContent = "+" + D.sign + (-diff).toFixed(2) + " (充值)";
-    } else {
-      todayEl.textContent = "0.00";
-    }
-  } else {
-    todayEl.textContent = "—";
+    const first = parseFloat(todayEntries[0].total) || 0;
+    const last = parseFloat(todayEntries[todayEntries.length - 1].total) || 0;
+    todayUsage = Math.max(0, first - last);
   }
-
-  // 记录天数 & 最高
+  const cumUsage = usage.reduce((s, u) => s + u.amount, 0);
   const dayCount = entries.length
-    ? Math.max(1, Math.round((now.getTime() / 1000 - entries[0].ts) / 86400))
-    : 0;
-  document.getElementById("days").textContent = dayCount ? dayCount + " 天" : "—";
+    ? Math.max(1, Math.round((now.getTime() / 1000 - entries[0].ts) / 86400)) : 0;
   const maxV = entries.reduce((m, e) => Math.max(m, parseFloat(e.total) || 0), 0);
-  document.getElementById("max").textContent = entries.length ? D.sign + maxV.toFixed(2) : "—";
 
-  drawChart(D, entries);
+  const data = {
+    cur: { label: "当前余额", cls: "bal", text: D.current ? sign + D.current : "—" },
+    today: { label: "今日消耗", cls: "use", text: todayUsage > 0.001 ? "-" + sign + todayUsage.toFixed(2) : "0.00" },
+    cum: { label: "累计消耗", cls: "use", text: cumUsage > 0.001 ? sign + cumUsage.toFixed(2) : "0.00" },
+    topup: { label: "累计充值", cls: "up", text: topup > 0.001 ? "+" + sign + topup.toFixed(2) : "0.00" },
+    days: { label: "记录天数", cls: "bal", text: dayCount ? dayCount + " 天" : "—" },
+    max: { label: "区间最高余额", cls: "bal", text: entries.length ? sign + maxV.toFixed(2) : "—" }
+  };
+
+  const visible = ALL_CARDS.filter(k => cfg.cards.indexOf(k) >= 0);
+  const statsEl = document.getElementById("stats");
+  statsEl.style.gridTemplateColumns = "repeat(" + Math.min(4, Math.max(1, visible.length)) + ", 1fr)";
+  let html = "";
+  visible.forEach(k => {
+    const c = data[k];
+    html += '<div class="card"><div class="label">' + c.label + '</div><div class="value ' + c.cls + '">' + c.text + '</div></div>';
+  });
+  statsEl.innerHTML = html;
+  return { todayUsage: todayUsage, cumUsage: cumUsage, dayCount: dayCount, maxV: maxV, topup: topup };
+}
+
+function renderDashboard() {
+  const D = window.__DS_DATA__ || { sign: "¥", current: "", entries: [] };
+  renderCards(D);
+  drawChart(D, (D.entries || []).slice());
 }
 
 function drawChart(D, all) {
   const el = document.getElementById("chart");
   const chart = echarts.init(el);
+  const sign = D.sign || "¥";
 
   let list = all;
   if (range > 0) {
     const cutoff = Date.now() / 1000 - range * 86400;
     list = all.filter(e => e.ts >= cutoff);
   }
-  // 按天聚合：每天取最后一条余额
   const byDay = {};
   list.forEach(e => {
-    const d = new Date(e.ts * 1000);
-    const key = d.getFullYear() + "-" +
-      String(d.getMonth() + 1).padStart(2, "0") + "-" +
-      String(d.getDate()).padStart(2, "0");
-    byDay[key] = { ts: e.ts, total: e.total };
+    const k = dayKey(e.ts);
+    byDay[k] = { ts: e.ts, total: e.total };
   });
   const keys = Object.keys(byDay).sort();
-  const data = keys.map(k => [byDay[k].ts * 1000, parseFloat(byDay[k].total)]);
+  const balData = keys.map(k => [byDay[k].ts * 1000, parseFloat(byDay[k].total)]);
+  const { usage } = splitUsage(all);
+  const useDays = usageByDay(usage, range);
+  const useData = useDays.map(u => [new Date(u.day + "T00:00:00").getTime(), +u.amount.toFixed(2)]);
 
-  chart.setOption({
+  const tooltipCommon = {
+    trigger: "axis",
+    backgroundColor: "rgba(13,20,40,0.92)",
+    borderColor: "rgba(255,255,255,0.15)",
+    textStyle: { color: "#dbe7ff", fontSize: 12 }
+  };
+  const xCommon = {
+    type: "time",
+    axisLine: { lineStyle: { color: "#2a3a5c" } },
+    axisTick: { show: false },
+    axisLabel: { color: "#7d90b8", fontSize: 11, formatter: v => { const d = new Date(v); return (d.getMonth()+1) + "/" + d.getDate(); } },
+    splitLine: { show: false }
+  };
+  const yCommon = {
+    type: "value", scale: true,
+    splitLine: { lineStyle: { color: "rgba(255,255,255,0.06)" } },
+    axisLabel: { color: "#7d90b8", fontSize: 11 }
+  };
+  const base = {
     backgroundColor: "transparent",
     animationDuration: 400,
-    grid: { left: 64, right: 28, top: 26, bottom: 44 },
-    tooltip: {
-      trigger: "axis",
-      backgroundColor: "rgba(13,20,40,0.92)",
-      borderColor: "rgba(255,255,255,0.15)",
-      textStyle: { color: "#dbe7ff", fontSize: 12 },
-      formatter: function (params) {
-        const p = params[0];
-        const d = new Date(p.value[0]);
-        const date = d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
-        return date + "<br/>余额: " + D.sign + p.value[1].toFixed(2);
-      }
-    },
-    xAxis: {
-      type: "time",
-      axisLine: { lineStyle: { color: "#2a3a5c" } },
-      axisTick: { show: false },
-      axisLabel: { color: "#7d90b8", fontSize: 11,
-        formatter: function (v) {
-          const d = new Date(v);
-          return (d.getMonth()+1) + "/" + d.getDate();
-        } },
-      splitLine: { show: false }
-    },
-    yAxis: {
-      type: "value",
-      scale: true,
-      splitLine: { lineStyle: { color: "rgba(255,255,255,0.06)" } },
-      axisLabel: { color: "#7d90b8", fontSize: 11, formatter: "{value}" }
-    },
-    series: [{
-      type: "line",
-      data: data,
-      smooth: true,
-      symbol: "circle",
-      symbolSize: 6,
-      showSymbol: data.length <= 40,
-      lineStyle: { width: 2.5, color: "#4da3ff" },
-      itemStyle: { color: "#4da3ff", borderColor: "#0b1020", borderWidth: 1 },
-      areaStyle: {
-        color: {
-          type: "linear", x: 0, y: 0, x2: 0, y2: 1,
-          colorStops: [
-            { offset: 0, color: "rgba(77,163,255,0.35)" },
-            { offset: 1, color: "rgba(77,163,255,0.02)" }
-          ]
+    grid: { left: 64, right: 28, top: 30, bottom: 44 },
+    tooltip: tooltipCommon,
+    xAxis: xCommon,
+    yAxis: yCommon
+  };
+
+  if (cfg.mode === "usage") {
+    chart.setOption(Object.assign({}, base, {
+      tooltip: Object.assign({}, tooltipCommon, {
+        formatter: function (params) {
+          const p = params[0];
+          const d = new Date(p.value[0]);
+          return dayKey(d.getTime() / 1000) + "<br/>使用量: " + sign + p.value[1].toFixed(2);
         }
-      }
-    }]
-  }, true);
+      }),
+      series: [{
+        name: "每日使用量",
+        type: "bar",
+        data: useData,
+        barMaxWidth: 30,
+        itemStyle: { color: "#ffb04d", borderRadius: [4,4,0,0] },
+        label: { show: useData.length <= 14, position: "top", color: "#ffb04d", fontSize: 10, formatter: p => sign + p.value[1].toFixed(2) }
+      }]
+    }), true);
+  } else if (cfg.mode === "compare") {
+    chart.setOption(Object.assign({}, base, {
+      tooltip: Object.assign({}, tooltipCommon, {
+        formatter: function (params) {
+          let s = "";
+          params.forEach(p => {
+            const d = new Date(p.value[0]);
+            s += dayKey(d.getTime() / 1000) + "<br/>";
+            if (p.seriesName === "余额") s += "余额: " + sign + p.value[1].toFixed(2);
+            else s += "使用量: " + sign + p.value[1].toFixed(2);
+            s += "<br/>";
+          });
+          return s;
+        }
+      }),
+      yAxis: [yCommon, Object.assign({}, yCommon, { splitLine: { show: false } })],
+      series: [
+        {
+          name: "余额", type: "line", data: balData, smooth: true,
+          symbol: "circle", symbolSize: 6, showSymbol: balData.length <= 40,
+          yAxisIndex: 0,
+          lineStyle: { width: 2.5, color: "#4da3ff" },
+          itemStyle: { color: "#4da3ff", borderColor: "#0b1020", borderWidth: 1 },
+          areaStyle: { color: { type: "linear", x: 0, y: 0, x2: 0, y2: 1, colorStops: [
+            { offset: 0, color: "rgba(77,163,255,0.35)" }, { offset: 1, color: "rgba(77,163,255,0.02)" }
+          ] } }
+        },
+        {
+          name: "使用量", type: "bar", data: useData, yAxisIndex: 1,
+          barMaxWidth: 22,
+          itemStyle: { color: "rgba(255,176,77,0.75)", borderRadius: [4,4,0,0] }
+        }
+      ]
+    }), true);
+  } else {
+    chart.setOption(Object.assign({}, base, {
+      tooltip: Object.assign({}, tooltipCommon, {
+        formatter: function (params) {
+          const p = params[0];
+          const d = new Date(p.value[0]);
+          return dayKey(d.getTime() / 1000) + "<br/>余额: " + sign + p.value[1].toFixed(2);
+        }
+      }),
+      series: [{
+        name: "余额",
+        type: "line", data: balData, smooth: true,
+        symbol: "circle", symbolSize: 6, showSymbol: balData.length <= 40,
+        lineStyle: { width: 2.5, color: "#4da3ff" },
+        itemStyle: { color: "#4da3ff", borderColor: "#0b1020", borderWidth: 1 },
+        areaStyle: { color: { type: "linear", x: 0, y: 0, x2: 0, y2: 1, colorStops: [
+          { offset: 0, color: "rgba(77,163,255,0.35)" }, { offset: 1, color: "rgba(77,163,255,0.02)" }
+        ] } }
+      }]
+    }), true);
+  }
 
   window.addEventListener("resize", () => chart.resize());
 }
 
-document.querySelectorAll(".btn").forEach(b => {
+/* ---------- 交互 ---------- */
+document.querySelectorAll(".range .btn").forEach(b => {
   b.addEventListener("click", function () {
-    document.querySelectorAll(".btn").forEach(x => x.classList.remove("active"));
+    document.querySelectorAll(".range .btn").forEach(x => x.classList.remove("active"));
     b.classList.add("active");
     range = parseInt(b.dataset.range, 10);
-    const D = window.__DS_DATA__ || { sign: "¥", entries: [] };
-    drawChart(D, (D.entries || []).slice());
+    renderDashboard();
   });
+});
+
+const cfgBtn = document.getElementById("cfgBtn");
+const cfgPanel = document.getElementById("cfgPanel");
+const mask = document.getElementById("mask");
+
+function openCfg() {
+  document.querySelectorAll(".cfg-panel input[data-card]").forEach(cb => {
+    cb.checked = cfg.cards.indexOf(cb.dataset.card) >= 0;
+  });
+  const modeRadio = document.querySelector('.cfg-panel input[name="mode"][value="' + cfg.mode + '"]');
+  if (modeRadio) modeRadio.checked = true;
+  cfgPanel.hidden = false;
+  mask.hidden = false;
+}
+function closeCfg() { cfgPanel.hidden = true; mask.hidden = true; }
+
+cfgBtn.addEventListener("click", openCfg);
+mask.addEventListener("click", closeCfg);
+document.getElementById("cfgCancel").addEventListener("click", closeCfg);
+document.getElementById("cfgSave").addEventListener("click", function () {
+  const cards = [];
+  document.querySelectorAll('.cfg-panel input[data-card]:checked').forEach(cb => cards.push(cb.dataset.card));
+  let mode = "balance";
+  const mr = document.querySelector('.cfg-panel input[name="mode"]:checked');
+  if (mr) mode = mr.value;
+  cfg = { cards: cards, mode: mode };
+  saveCfg(cfg);
+  closeCfg();
+  renderDashboard();
 });
 
 renderDashboard();

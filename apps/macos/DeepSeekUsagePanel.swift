@@ -742,7 +742,7 @@ final class SettingsWindow: NSWindow {
 }
 
 // MARK: - 看板窗口（余额历史曲线，加载 shared/ui 的 Web 看板）
-final class DashboardWindow: NSWindow, WKNavigationDelegate {
+final class DashboardWindow: NSWindow, WKNavigationDelegate, WKScriptMessageHandler {
     private var webView: WKWebView!
     private var loaded = false
 
@@ -755,6 +755,9 @@ final class DashboardWindow: NSWindow, WKNavigationDelegate {
         minSize = NSSize(width: 560, height: 380)
         appearance = NSAppearance(named: .darkAqua)
         let config = WKWebViewConfiguration()
+        let controller = WKUserContentController()
+        controller.add(self, name: "log")
+        config.userContentController = controller
         webView = WKWebView(frame: contentView!.bounds, configuration: config)
         webView.autoresizingMask = [.width, .height]
         webView.navigationDelegate = self
@@ -781,13 +784,19 @@ final class DashboardWindow: NSWindow, WKNavigationDelegate {
         let entries = SharedStore.historyJSON() ?? "[]"
         let total = SharedStore.get("total") as? String ?? ""
         let sign = SharedStore.get("sign") as? String ?? "¥"
-        let js = "window.__DS_DATA__ = { sign: \(Self.jsStr(sign)), current: \(Self.jsStr(total)), entries: \(entries) }; renderDashboard();"
+        let js = "window.__DS_DATA__ = { sign: \(Self.jsStr(sign)), current: \(Self.jsStr(total)), entries: \(entries) }; console.log('injected', JSON.stringify(window.__DS_DATA__).slice(0, 300)); renderDashboard();"
         webView.evaluateJavaScript(js, completionHandler: nil)
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         refreshData()
         loaded = true
+    }
+
+    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        if message.name == "log" {
+            NSLog("DashboardJS: \(String(describing: message.body))")
+        }
     }
 
     static func jsStr(_ s: String) -> String {
@@ -879,6 +888,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         dashboard?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         dashboard?.refreshData()
+        // 页面未加载完成时 evaluateJavaScript 会静默失败，延迟补发注入
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+            self?.dashboard?.refreshData()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
+            self?.dashboard?.refreshData()
+        }
     }
 
     @objc private func toggleLaunchAtLogin() {

@@ -60,6 +60,13 @@
 <script>
 let range = 7;
 
+// 转发 console 到宿主（macOS WKWebView 调试用）
+if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.log) {
+  console.log = function () {
+    try { window.webkit.messageHandlers.log.postMessage(Array.prototype.slice.call(arguments).join(" ")); } catch (e) {}
+  };
+}
+
 // 数据获取：macOS 端由宿主注入 window.__DS_DATA__；Tauri/Web 端通过 invoke 拉取
 function fetchData(cb) {
   if (window.__DS_DATA__) { cb(window.__DS_DATA__); return; }

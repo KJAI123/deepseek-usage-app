@@ -267,6 +267,10 @@ final class FloatingPanel: NSPanel {
         get { SharedStore.get("refreshInterval") as? Int ?? 60 }
         set { SharedStore.set("refreshInterval", newValue) }
     }
+    private var alwaysOnTop: Bool {
+        get { SharedStore.get("alwaysOnTop") as? Bool ?? true }
+        set { SharedStore.set("alwaysOnTop", newValue) }
+    }
     private var isMini: Bool { displayMode == 0 }
 
     // UI 元素（随模式重建）
@@ -291,7 +295,7 @@ final class FloatingPanel: NSPanel {
                    styleMask: [.nonactivatingPanel, .borderless, .fullSizeContentView],
                    backing: .buffered, defer: false)
         isFloatingPanel = true
-        level = .floating
+        level = alwaysOnTop ? .floating : .normal
         isOpaque = false
         backgroundColor = .clear
         hasShadow = true
@@ -308,6 +312,11 @@ final class FloatingPanel: NSPanel {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     // MARK: - 布局构建 / 模式切换
+    /// 设置是否置顶：true → floating 层（始终在最前）；false → normal 层（会被其他窗口遮挡）
+    func setAlwaysOnTop(_ on: Bool) {
+        level = on ? .floating : .normal
+    }
+
     func applyMode() {
         contentView?.subviews.forEach { $0.removeFromSuperview() }
         let w: CGFloat = isMini ? 320 : 340
@@ -571,11 +580,13 @@ final class FloatingPanel: NSPanel {
                                    sourceType: sourceType,
                                    baseURL: baseURL,
                                    apiKey: SharedStore.apiKey() ?? "",
-                                   interval: interval)
+                                   interval: interval,
+                                   alwaysOnTop: alwaysOnTop)
         sheet.onSave = { [weak self] in
             guard let self = self else { return }
             self.interval = SharedStore.get("refreshInterval") as? Int ?? 60
             if self.interval <= 0 { self.interval = 60 }
+            self.setAlwaysOnTop(SharedStore.get("alwaysOnTop") as? Bool ?? true)
             let newMode = SharedStore.get("displayMode") as? Int ?? 0
             if newMode != self.displayMode {
                 self.displayMode = newMode
@@ -603,20 +614,21 @@ final class SettingsWindow: NSWindow {
     private let sourcePopup = NSPopUpButton(frame: NSRect(x: 114, y: 194, width: 170, height: 26), pullsDown: false)
     private let baseField = NSTextField(frame: NSRect(x: 114, y: 152, width: 240, height: 24))
     private let intervalPopup = NSPopUpButton(frame: NSRect(x: 124, y: 110, width: 120, height: 26), pullsDown: false)
+    private let topCheck = NSButton(checkboxWithTitle: "窗口始终置顶", target: nil, action: nil)
     private let intervals = [15, 30, 60, 120, 300]
 
-    init(displayMode: Int, sourceType: Int, baseURL: String, apiKey: String, interval: Int) {
-        super.init(contentRect: NSRect(x: 0, y: 0, width: 380, height: 332),
+    init(displayMode: Int, sourceType: Int, baseURL: String, apiKey: String, interval: Int, alwaysOnTop: Bool) {
+        super.init(contentRect: NSRect(x: 0, y: 0, width: 380, height: 348),
                    styleMask: [.titled, .closable], backing: .buffered, defer: false)
         title = "DeepSeek 用量面板 · 设置"
         isReleasedWhenClosed = false
         appearance = NSAppearance(named: .darkAqua)
         buildUI(displayMode: displayMode, sourceType: sourceType, baseURL: baseURL,
-                apiKey: apiKey, interval: interval)
+                apiKey: apiKey, interval: interval, alwaysOnTop: alwaysOnTop)
     }
 
     private func buildUI(displayMode: Int, sourceType: Int, baseURL: String,
-                         apiKey: String, interval: Int) {
+                         apiKey: String, interval: Int, alwaysOnTop: Bool) {
         let content = contentView!
         let labelFont = NSFont.systemFont(ofSize: 12)
         let labelColor = NSColor.secondaryLabelColor
@@ -682,13 +694,19 @@ final class SettingsWindow: NSWindow {
         if intervalPopup.selectedTag() == -1 { intervalPopup.selectItem(withTag: 60) }
         content.addSubview(intervalPopup)
 
+        // 窗口置顶
+        content.addSubview(label("窗口置顶", NSRect(x: 20, y: 88, width: 90, height: 20)))
+        topCheck.state = alwaysOnTop ? .on : .off
+        topCheck.frame = NSRect(x: 112, y: 86, width: 160, height: 20)
+        content.addSubview(topCheck)
+
         // 说明
         let hint = NSTextField(labelWithString: "Key 仅保存在本机「钥匙串」。官方接口 api.deepseek.com/user/balance；自定义网关自动探测 /user/balance 与 /v1/user/balance（兼容 new-api / one-api 等 OpenAI 风格网关）。")
         hint.font = .systemFont(ofSize: 10)
         hint.textColor = .tertiaryLabelColor
         hint.maximumNumberOfLines = 0
         hint.lineBreakMode = .byWordWrapping
-        hint.frame = NSRect(x: 20, y: 60, width: 340, height: 40)
+        hint.frame = NSRect(x: 20, y: 46, width: 340, height: 36)
         content.addSubview(hint)
 
         // 按钮
@@ -726,6 +744,7 @@ final class SettingsWindow: NSWindow {
         SharedStore.set("baseURL", base)
         let tag = intervalPopup.selectedTag()
         SharedStore.set("refreshInterval", tag > 0 ? tag : 60)
+        SharedStore.set("alwaysOnTop", topCheck.state == .on)
         close()
         onSave?()
     }

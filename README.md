@@ -5,7 +5,7 @@
 
 ![platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-blue)
 ![license](https://img.shields.io/badge/license-MIT-green)
-![build](https://img.shields.io/github/actions/workflow/status/<your-github>/deepseek-usage-app/build.yml?label=build)
+![build](https://img.shields.io/github/actions/workflow/status/KJAI123/deepseek-usage-app/build.yml?label=build)
 
 ## 功能一览
 

@@ -97,6 +97,9 @@ enum SharedStore {
         write("balance.json", payload)
     }
 
+    /// 读余额缓存（看板/小组件共用）
+    static func readBalance() -> [String: Any]? { read("balance.json") }
+
     /// API Key 读取：优先共享配置，兜底旧钥匙串
     static func apiKey() -> String? {
         if let k = get("apiKey") as? String, !k.isEmpty { return k }
@@ -810,8 +813,9 @@ final class DashboardWindow: NSWindow, WKNavigationDelegate, WKScriptMessageHand
 
     func refreshData() {
         let entries = SharedStore.historyJSON() ?? "[]"
-        let total = SharedStore.get("total") as? String ?? ""
-        let sign = SharedStore.get("sign") as? String ?? "¥"
+        let balance = SharedStore.readBalance()
+        let total = balance?["total"] as? String ?? ""
+        let sign = balance?["sign"] as? String ?? "¥"
         let js = "window.__DS_DATA__ = { sign: \(Self.jsStr(sign)), current: \(Self.jsStr(total)), entries: \(entries) }; console.log('injected', JSON.stringify(window.__DS_DATA__).slice(0, 300)); renderDashboard();"
         webView.evaluateJavaScript(js, completionHandler: nil)
     }

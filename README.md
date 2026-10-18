@@ -35,6 +35,8 @@ open DeepSeekUsagePanel.app
 
 **窗口置顶**：默认悬浮窗始终置顶；在「设置… → 窗口始终置顶」取消勾选后，悬浮窗会变为普通窗口层级，不再遮挡其他应用。
 
+**数据存储**：配置与余额历史保存在 `~/Library/Application Support/DeepSeekUsagePanel/`（API Key 同时写钥匙串兜底）。macOS 本地开发使用非沙盒模式（ad-hoc 签名无 Apple Developer team id，App Group 与沙盒文件豁免均不可用）；**正式上架 App Store 时将恢复沙盒 + App Group**（届时桌面小组件可直接读取共享余额）。
+
 **桌面小组件**（macOS 14+）：桌面右键 → 编辑小组件 → 搜索 **DeepSeek**，拖到桌面即可（小/中两种尺寸，每 15 分钟刷新）。
 
 ### Windows（Tauri 2）

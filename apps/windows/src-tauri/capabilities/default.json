@@ -1,0 +1,14 @@
+{
+  "identifier": "default",
+  "description": "DeepSeek 用量面板默认权限",
+  "windows": ["main", "dashboard", "settings"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-close",
+    "core:window:allow-show",
+    "core:window:allow-hide",
+    "core:window:allow-set-focus",
+    "core:window:allow-minimize"
+  ]
+}

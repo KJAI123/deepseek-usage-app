@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>DeepSeek 用量</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; user-select: none; }
+  html, body { width: 100%; height: 100%; background: transparent; overflow: hidden; }
+  body {
+    font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    color: #dbe7ff;
+  }
+  .panel {
+    width: 100%; height: 100%;
+    background: linear-gradient(150deg, rgba(16,24,48,0.96), rgba(10,18,38,0.96));
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 12px;
+    padding: 10px 14px;
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .row { display: flex; align-items: center; justify-content: space-between; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: #f59e0b; flex: none; }
+  .dot.ok { background: #34d399; }
+  .dot.err { background: #f87171; }
+  .title { font-size: 12px; color: #7d90b8; }
+  .balance { font-size: 26px; font-weight: 700; color: #4da3ff; letter-spacing: 0.5px; }
+  .balance.dim { color: #7d90b8; }
+  .foot { font-size: 10px; color: #5b6c8f; }
+  .btns { display: flex; gap: 6px; margin-top: 2px; }
+  button {
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.14);
+    color: #aabce0;
+    border-radius: 6px;
+    padding: 3px 10px;
+    font-size: 11px;
+    cursor: pointer;
+    flex: 1;
+  }
+  button:hover { background: rgba(255,255,255,0.16); }
+  button.primary { background: #2563eb; border-color: #2563eb; color: #fff; }
+</style>
+</head>
+<body>
+<div class="panel" data-tauri-drag-region>
+  <div class="row">
+    <span class="title">DeepSeek 余额</span>
+    <span class="dot" id="dot"></span>
+  </div>
+  <div class="balance dim" id="balance">—</div>
+  <div class="foot" id="foot">未设置 Key 请点设置</div>
+  <div class="btns">
+    <button id="refresh" class="primary">刷新</button>
+    <button id="dashboard">看板</button>
+    <button id="settings">设置</button>
+  </div>
+</div>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  const invoke = (cmd, args) => window.__TAURI__.core.invoke(cmd, args);
+
+  let interval = 60;
+  let timer = 0;
+
+  function paint(b) {
+    const dot = $("dot");
+    const bal = $("balance");
+    if (b.error) {
+      dot.className = "dot err";
+      bal.textContent = "—";
+      bal.classList.add("dim");
+      $("foot").textContent = b.error;
+      return;
+    }
+    dot.className = b.available ? "dot ok" : "dot err";
+    bal.textContent = "¥" + b.total;
+    bal.classList.remove("dim");
+    const t = b.updated_at ? new Date(b.updated_at * 1000).toLocaleTimeString("zh-CN") : "—";
+    $("foot").textContent = "更新于 " + t;
+  }
+
+  async function refreshNow() {
+    const b = await invoke("refresh");
+    paint(b);
+  }
+
+  async function load() {
+    const [cfg, b] = await Promise.all([invoke("get_config"), invoke("get_balance_cached")]);
+    interval = (cfg.refresh_interval || 60) * 1000;
+    paint(b);
+    if (!cfg.api_key) { $("foot").textContent = "未设置 Key，请点设置"; }
+  }
+
+  $("refresh").addEventListener("click", refreshNow);
+  $("dashboard").addEventListener("click", () => invoke("open_dashboard"));
+  $("settings").addEventListener("click", () => invoke("open_settings"));
+
+  setInterval(refreshNow, 60000); // 保底每分钟
+  load();
+  refreshNow();
+</script>
+</body>
+</html>

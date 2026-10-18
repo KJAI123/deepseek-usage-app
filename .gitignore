@@ -1,0 +1,27 @@
+# macOS
+*.app
+*.app.zip
+build_tmp/
+.DS_Store
+
+# Rust / Tauri
+target/
+node_modules/
+dist/
+apps/windows/src-tauri/target/
+
+# Node
+package-lock.json
+*.log
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# 图标中间产物
+apps/windows/src-tauri/icon.iconset/
+
+# Secrets
+.env
+*.pem

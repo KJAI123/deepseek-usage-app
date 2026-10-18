@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DeepSeek 用量看板</title>
+<script src="echarts.min.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: linear-gradient(160deg, #0b1020 0%, #101a33 55%, #0d1b33 100%);
+    color: #dbe7ff;
+    padding: 20px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  .card {
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 12px;
+    padding: 12px 14px;
+  }
+  .card .label { font-size: 12px; color: #7d90b8; margin-bottom: 6px; }
+  .card .value { font-size: 22px; font-weight: 700; letter-spacing: 0.5px; color: #4da3ff; }
+  .card .value.warn { color: #ffb04d; }
+  .range { display: flex; gap: 8px; }
+  .btn {
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.12);
+    color: #aabce0;
+    border-radius: 8px;
+    padding: 6px 16px;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all .15s;
+  }
+  .btn:hover { background: rgba(255,255,255,0.12); }
+  .btn.active { background: #2563eb; border-color: #2563eb; color: #fff; }
+  #chart { flex: 1; min-height: 260px; }
+</style>
+</head>
+<body>
+<div class="stats">
+  <div class="card"><div class="label">当前余额</div><div class="value" id="cur">—</div></div>
+  <div class="card"><div class="label">今日消耗</div><div class="value" id="today">—</div></div>
+  <div class="card"><div class="label">记录天数</div><div class="value" id="days">—</div></div>
+  <div class="card"><div class="label">区间最高余额</div><div class="value" id="max">—</div></div>
+</div>
+<div class="range">
+  <button class="btn active" data-range="7">近 7 天</button>
+  <button class="btn" data-range="30">近 30 天</button>
+  <button class="btn" data-range="0">全部</button>
+</div>
+<div id="chart"></div>
+
+<script>
+let range = 7;
+
+// 数据获取：macOS 端由宿主注入 window.__DS_DATA__；Tauri/Web 端通过 invoke 拉取
+function fetchData(cb) {
+  if (window.__DS_DATA__) { cb(window.__DS_DATA__); return; }
+  if (window.__TAURI__ && window.__TAURI__.core) {
+    Promise.all([
+      window.__TAURI__.core.invoke("get_balance_cached"),
+      window.__TAURI__.core.invoke("get_history")
+    ]).then(function (res) {
+      const b = res[0] || {};
+      cb({ sign: "¥", current: b.total || "", entries: res[1] || [] });
+    }).catch(function () { cb({ sign: "¥", current: "", entries: [] }); });
+    return;
+  }
+  cb({ sign: "¥", current: "", entries: [] });
+}
+
+function boot() {
+  fetchData(function (D) {
+    window.__DS_DATA__ = D;
+    renderDashboard();
+  });
+}
+
+function renderDashboard() {
+  const D = window.__DS_DATA__ || { sign: "¥", current: "", entries: [] };
+  const entries = (D.entries || []).slice();
+
+  document.getElementById("cur").textContent = (D.current ? D.sign + D.current : "—");
+
+  // 今日消耗 = 今天首条余额 - 今天最新余额
+  const now = new Date();
+  const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() / 1000;
+  const todayEntries = entries.filter(e => e.ts >= dayStart);
+  const todayEl = document.getElementById("today");
+  todayEl.className = "value";
+  if (todayEntries.length >= 2) {
+    const first = parseFloat(todayEntries[0].total);
+    const last = parseFloat(todayEntries[todayEntries.length - 1].total);
+    const diff = first - last;
+    if (diff > 0.001) {
+      todayEl.textContent = "-" + D.sign + diff.toFixed(2);
+      if (diff >= 20) todayEl.classList.add("warn");
+    } else if (diff < -0.001) {
+      todayEl.textContent = "+" + D.sign + (-diff).toFixed(2) + " (充值)";
+    } else {
+      todayEl.textContent = "0.00";
+    }
+  } else {
+    todayEl.textContent = "—";
+  }
+
+  // 记录天数 & 最高
+  const dayCount = entries.length
+    ? Math.max(1, Math.round((now.getTime() / 1000 - entries[0].ts) / 86400))
+    : 0;
+  document.getElementById("days").textContent = dayCount ? dayCount + " 天" : "—";
+  const maxV = entries.reduce((m, e) => Math.max(m, parseFloat(e.total) || 0), 0);
+  document.getElementById("max").textContent = entries.length ? D.sign + maxV.toFixed(2) : "—";
+
+  drawChart(D, entries);
+}
+
+function drawChart(D, all) {
+  const el = document.getElementById("chart");
+  const chart = echarts.init(el);
+
+  let list = all;
+  if (range > 0) {
+    const cutoff = Date.now() / 1000 - range * 86400;
+    list = all.filter(e => e.ts >= cutoff);
+  }
+  // 按天聚合：每天取最后一条余额
+  const byDay = {};
+  list.forEach(e => {
+    const d = new Date(e.ts * 1000);
+    const key = d.getFullYear() + "-" +
+      String(d.getMonth() + 1).padStart(2, "0") + "-" +
+      String(d.getDate()).padStart(2, "0");
+    byDay[key] = { ts: e.ts, total: e.total };
+  });
+  const keys = Object.keys(byDay).sort();
+  const data = keys.map(k => [byDay[k].ts * 1000, parseFloat(byDay[k].total)]);
+
+  chart.setOption({
+    backgroundColor: "transparent",
+    animationDuration: 400,
+    grid: { left: 64, right: 28, top: 26, bottom: 44 },
+    tooltip: {
+      trigger: "axis",
+      backgroundColor: "rgba(13,20,40,0.92)",
+      borderColor: "rgba(255,255,255,0.15)",
+      textStyle: { color: "#dbe7ff", fontSize: 12 },
+      formatter: function (params) {
+        const p = params[0];
+        const d = new Date(p.value[0]);
+        const date = d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
+        return date + "<br/>余额: " + D.sign + p.value[1].toFixed(2);
+      }
+    },
+    xAxis: {
+      type: "time",
+      axisLine: { lineStyle: { color: "#2a3a5c" } },
+      axisTick: { show: false },
+      axisLabel: { color: "#7d90b8", fontSize: 11,
+        formatter: function (v) {
+          const d = new Date(v);
+          return (d.getMonth()+1) + "/" + d.getDate();
+        } },
+      splitLine: { show: false }
+    },
+    yAxis: {
+      type: "value",
+      scale: true,
+      splitLine: { lineStyle: { color: "rgba(255,255,255,0.06)" } },
+      axisLabel: { color: "#7d90b8", fontSize: 11, formatter: "{value}" }
+    },
+    series: [{
+      type: "line",
+      data: data,
+      smooth: true,
+      symbol: "circle",
+      symbolSize: 6,
+      showSymbol: data.length <= 40,
+      lineStyle: { width: 2.5, color: "#4da3ff" },
+      itemStyle: { color: "#4da3ff", borderColor: "#0b1020", borderWidth: 1 },
+      areaStyle: {
+        color: {
+          type: "linear", x: 0, y: 0, x2: 0, y2: 1,
+          colorStops: [
+            { offset: 0, color: "rgba(77,163,255,0.35)" },
+            { offset: 1, color: "rgba(77,163,255,0.02)" }
+          ]
+        }
+      }
+    }]
+  }, true);
+
+  window.addEventListener("resize", () => chart.resize());
+}
+
+document.querySelectorAll(".btn").forEach(b => {
+  b.addEventListener("click", function () {
+    document.querySelectorAll(".btn").forEach(x => x.classList.remove("active"));
+    b.classList.add("active");
+    range = parseInt(b.dataset.range, 10);
+    const D = window.__DS_DATA__ || { sign: "¥", entries: [] };
+    drawChart(D, (D.entries || []).slice());
+  });
+});
+
+renderDashboard();
+boot();
+</script>
+</body>
+</html>

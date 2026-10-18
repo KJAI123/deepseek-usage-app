@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>设置</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    background: #0f1626;
+    color: #dbe7ff;
+    padding: 20px;
+  }
+  h2 { font-size: 15px; margin-bottom: 16px; color: #4da3ff; }
+  label { display: block; font-size: 12px; color: #7d90b8; margin: 10px 0 4px; }
+  input, select {
+    width: 100%;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.14);
+    color: #e8f0ff;
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-size: 13px;
+    outline: none;
+  }
+  input:focus { border-color: #2563eb; }
+  .row { display: flex; gap: 10px; }
+  .row > div { flex: 1; }
+  .save {
+    margin-top: 18px;
+    width: 100%;
+    background: #2563eb;
+    border: none;
+    color: #fff;
+    border-radius: 8px;
+    padding: 10px;
+    font-size: 14px;
+    cursor: pointer;
+  }
+  .save:hover { background: #1d4ed8; }
+  .hint { font-size: 11px; color: #5b6c8f; margin-top: 10px; line-height: 1.5; }
+</style>
+</head>
+<body>
+<h2>DeepSeek 用量面板设置</h2>
+
+<label>API Key（sk-…）</label>
+<input id="key" type="password" placeholder="粘贴你的 DeepSeek API Key">
+
+<div class="row">
+  <div>
+    <label>数据源</label>
+    <select id="source">
+      <option value="https://api.deepseek.com">DeepSeek 官方</option>
+      <option value="custom">自定义网关（new-api / one-api）</option>
+    </select>
+  </div>
+  <div>
+    <label>刷新间隔</label>
+    <select id="interval">
+      <option value="15">15 秒</option>
+      <option value="30">30 秒</option>
+      <option value="60" selected>60 秒</option>
+      <option value="300">5 分钟</option>
+    </select>
+  </div>
+</div>
+
+<div id="baseWrap" style="display:none">
+  <label>网关地址（自动探测 /user/balance 与 /v1/user/balance）</label>
+  <input id="base" placeholder="https://your-gateway.example.com">
+</div>
+
+<button class="save" id="save">保存</button>
+<div class="hint">余额为账号级（充值+赠送合计）。Key 仅保存在本机 %APPDATA%。</div>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  const invoke = (cmd, args) => window.__TAURI__.core.invoke(cmd, args);
+
+  async function init() {
+    const cfg = await invoke("get_config");
+    $("key").value = cfg.api_key || "";
+    if (cfg.base_url && cfg.base_url !== "https://api.deepseek.com") {
+      $("source").value = "custom";
+      $("base").value = cfg.base_url;
+      $("baseWrap").style.display = "block";
+    }
+    $("interval").value = String(cfg.refresh_interval || 60);
+  }
+
+  $("source").addEventListener("change", () => {
+    $("baseWrap").style.display = $("source").value === "custom" ? "block" : "none";
+  });
+
+  $("save").addEventListener("click", async () => {
+    const custom = $("source").value === "custom";
+    const base = custom ? ($("base").value.trim() || "https://api.deepseek.com") : "https://api.deepseek.com";
+    await invoke("save_config", {
+      cfg: {
+        api_key: $("key").value.trim(),
+        base_url: base,
+        refresh_interval: parseInt($("interval").value, 10)
+      }
+    });
+    window.close();
+  });
+
+  init();
+</script>
+</body>
+</html>

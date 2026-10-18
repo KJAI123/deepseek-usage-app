@@ -1,9 +1,19 @@
 // DeepSeek 用量小组件（WidgetKit, macOS 14+）
-// 只读主应用写入 App Group 共享容器的 balance.json，每 15 分钟刷新一次
+// 只读主应用写入共享目录的 balance.json（temporary-exception entitlement），每 15 分钟刷新一次
 import WidgetKit
 import SwiftUI
 
-private let appGroupID = "group.com.local.deepseek-usage-panel"
+private func balanceFile() -> URL {
+    // 沙盒内 home 被重定向到容器，用 passwd 取真实 home 定位共享目录
+    let home: String
+    if let pw = getpwuid(getuid()), let d = pw.pointee.pw_dir {
+        home = String(cString: d)
+    } else {
+        home = NSHomeDirectory()
+    }
+    return URL(fileURLWithPath: home)
+        .appendingPathComponent("Library/Application Support/DeepSeekUsagePanel/balance.json")
+}
 
 struct BalanceEntry: TimelineEntry {
     let date: Date
@@ -29,9 +39,8 @@ struct BalanceProvider: TimelineProvider {
     }
 
     private func current() -> BalanceEntry {
-        // 沙箱环境下通过 containerURL 定位 App Group 共享文件
-        guard let base = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupID),
-              let data = try? Data(contentsOf: base.appendingPathComponent("balance.json")),
+        // 通过共享目录读取主应用写入的余额（temporary-exception 只读授权）
+        guard let data = try? Data(contentsOf: balanceFile()),
               let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
             return BalanceEntry(date: Date(), total: "—", sign: "¥", updatedAt: nil, available: true)
         }

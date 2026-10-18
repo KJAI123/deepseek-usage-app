@@ -3,7 +3,7 @@
 set -e
 cd "$(dirname "$0")"
 APP="DeepSeekUsagePanel.app"
-APP_GROUP="group.com.local.deepseek-usage-panel"
+APP_GROUP="group.com.local.deepseek-usage-panel2"
 
 rm -rf "$APP" build_tmp
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/PlugIns/DSWidget.appex/Contents/MacOS" "$APP/Contents/Resources/dashboard" build_tmp
@@ -42,7 +42,7 @@ lipo -create build_tmp/widget_arm build_tmp/widget_x86 -output "$APP/Contents/Pl
 cp widget/Info.plist "$APP/Contents/PlugIns/DSWidget.appex/Contents/Info.plist"
 printf '????' > "$APP/Contents/PlugIns/DSWidget.appex/Contents/PkgInfo"
 
-echo "== 签名（ad-hoc + App Group 权限）=="
+echo "== 签名（主应用非沙盒；小组件沙盒 + 共享目录只读）=="
 codesign --force --sign - --entitlements Widget.entitlements "$APP/Contents/PlugIns/DSWidget.appex"
 codesign --force --sign - --entitlements App.entitlements "$APP"
 

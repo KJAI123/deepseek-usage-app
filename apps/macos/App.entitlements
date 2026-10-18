@@ -2,13 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>com.apple.security.app-sandbox</key>
-    <true/>
+    <!-- 主应用本地开发使用非沙盒模式（ad-hoc 签名下 App Group / temporary-exception 均不生效，
+         非沙盒可读写共享目录 ~/Library/Application Support/DeepSeekUsagePanel）。
+         上架 App Store 时再启用 app-sandbox + application-groups（需 Apple Developer team id）。 -->
     <key>com.apple.security.network.client</key>
     <true/>
-    <key>com.apple.security.application-groups</key>
-    <array>
-        <string>group.com.local.deepseek-usage-panel</string>
-    </array>
 </dict>
 </plist>

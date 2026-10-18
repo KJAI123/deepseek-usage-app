@@ -39,58 +39,62 @@ enum KeychainStore {
 // MARK: - App Group 共享存储（config.json / balance.json）
 // 主应用与小组件均为沙箱进程，通过 App Group 容器共享数据
 enum SharedStore {
-    static let groupID = "group.com.local.deepseek-usage-panel"
-    static let balanceFileName = "balance.json"
-    static let configFileName = "config.json"
-
-    private static var dirURL: URL? {
-        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: groupID)
+    /// 共享数据目录：真实 ~/Library/Application Support/DeepSeekUsagePanel
+    /// 主应用与小组件通过 temporary-exception entitlement 访问（ad-hoc 签名无 team id，
+    /// App Group 不可用，故用此共享目录）
+    static func realHome() -> String {
+        // 沙盒内 FileManager/NSHomeDirectory 被重定向到容器，须用 passwd 取真实 home
+        if let pw = getpwuid(getuid()), let d = pw.pointee.pw_dir {
+            return String(cString: d)
+        }
+        return NSHomeDirectory()
     }
 
-    static func loadConfig() -> [String: Any] {
-        guard let base = dirURL else { return [:] }
-        let url = base.appendingPathComponent(configFileName)
+    static func dirURL() -> URL {
+        URL(fileURLWithPath: realHome())
+            .appendingPathComponent("Library/Application Support/DeepSeekUsagePanel")
+    }
+
+    static func diagPath() -> String { dirURL().path }
+
+    private static func read(_ name: String) -> [String: Any]? {
+        let url = dirURL().appendingPathComponent(name)
         guard let data = try? Data(contentsOf: url),
-              let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return [:] }
+              let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return nil }
         return json
     }
 
-    static func saveConfig(_ dict: [String: Any]) {
-        guard let base = dirURL else { return }
+    private static func write(_ name: String, _ dict: [String: Any]) {
+        let dir = dirURL()
         do {
-            try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
             let data = try JSONSerialization.data(withJSONObject: dict, options: [.prettyPrinted])
-            try data.write(to: base.appendingPathComponent(configFileName))
+            try data.write(to: dir.appendingPathComponent(name))
         } catch {
-            NSLog("SharedStore saveConfig failed: \(error.localizedDescription)")
+            NSLog("SharedStore write \(name) failed: \(error.localizedDescription)")
         }
     }
+
+    static func loadConfig() -> [String: Any] { read("config.json") ?? [:] }
 
     static func get(_ key: String) -> Any? { loadConfig()[key] }
     static func set(_ key: String, _ value: Any) {
         var d = loadConfig()
         d[key] = value
-        saveConfig(d)
+        write("config.json", d)
     }
 
     /// 写余额缓存（供小组件读取）
     static func writeBalance(_ b: AccountBalance, sign: String) {
-        guard let base = dirURL else { return }
-        do {
-            try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
-            let payload: [String: Any] = [
-                "total": b.total,
-                "sign": sign,
-                "granted": b.granted ?? "0",
-                "topped": b.toppedUp ?? "0",
-                "available": b.isAvailable,
-                "updatedAt": Date().timeIntervalSince1970,
-            ]
-            let data = try JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted])
-            try data.write(to: base.appendingPathComponent(balanceFileName))
-        } catch {
-            NSLog("SharedStore writeBalance failed: \(error.localizedDescription)")
-        }
+        let payload: [String: Any] = [
+            "total": b.total,
+            "sign": sign,
+            "granted": b.granted ?? "0",
+            "topped": b.toppedUp ?? "0",
+            "available": b.isAvailable,
+            "updatedAt": Date().timeIntervalSince1970,
+        ]
+        write("balance.json", payload)
     }
 
     /// API Key 读取：优先共享配置，兜底旧钥匙串
@@ -101,15 +105,9 @@ enum SharedStore {
 
     // MARK: - 余额历史（看板数据源）
 
-    /// 追加一条余额记录到 history.json（同一次刷新 5 秒内去重，保留近 90 天 / 最多 1000 条）
+    /// 追加一条余额记录到共享历史（同一次刷新 5 秒内去重，保留近 90 天 / 最多 1000 条）
     static func appendHistory(total: String) {
-        guard let base = dirURL else { return }
-        let url = base.appendingPathComponent("history.json")
-        var entries: [[String: Any]] = []
-        if let data = try? Data(contentsOf: url),
-           let arr = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] {
-            entries = arr
-        }
+        var entries = historyEntries()
         let ts = Date().timeIntervalSince1970
         if let last = entries.last?["ts"] as? Double, ts - last < 5 {
             entries.removeLast()
@@ -118,16 +116,26 @@ enum SharedStore {
         let cutoff = Date().addingTimeInterval(-86400 * 90).timeIntervalSince1970
         entries = entries.filter { ($0["ts"] as? Double ?? 0) > cutoff }
         if entries.count > 1000 { entries = Array(entries.suffix(1000)) }
-        if let data = try? JSONSerialization.data(withJSONObject: entries) {
-            try? data.write(to: url)
+        let url = dirURL().appendingPathComponent("history.json")
+        do {
+            try FileManager.default.createDirectory(at: dirURL(), withIntermediateDirectories: true)
+            let data = try JSONSerialization.data(withJSONObject: entries)
+            try data.write(to: url)
+        } catch {
+            NSLog("SharedStore appendHistory failed: \(error.localizedDescription)")
         }
     }
 
-    /// 返回 history.json 原始 JSON 字符串（供看板注入）
+    static func historyEntries() -> [[String: Any]] {
+        let url = dirURL().appendingPathComponent("history.json")
+        guard let data = try? Data(contentsOf: url),
+              let arr = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] else { return [] }
+        return arr
+    }
+
+    /// 返回历史 JSON 字符串（供看板注入）
     static func historyJSON() -> String? {
-        guard let base = dirURL else { return nil }
-        let url = base.appendingPathComponent("history.json")
-        guard let data = try? Data(contentsOf: url) else { return nil }
+        guard let data = try? JSONSerialization.data(withJSONObject: historyEntries()) else { return nil }
         return String(data: data, encoding: .utf8)
     }
 }
@@ -838,6 +846,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        NSLog("DSAPP diag: dir=\(SharedStore.diagPath()) cfg=\(SharedStore.loadConfig())")
         setupStatusItem()
         let p = FloatingPanel()
         panel = p

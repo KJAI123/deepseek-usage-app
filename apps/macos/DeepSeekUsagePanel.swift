@@ -284,6 +284,10 @@ final class FloatingPanel: NSPanel {
     }
     private var isMini: Bool { displayMode == 0 }
     private var isDashboard: Bool { displayMode == 2 }
+    private var opacity: Double {                    // 面板透明度 0.5~1.0
+        get { SharedStore.get("opacity") as? Double ?? 1.0 }
+        set { SharedStore.set("opacity", newValue) }
+    }
 
     // UI 元素（随模式重建）
     private var statusDot: DragView!
@@ -301,8 +305,8 @@ final class FloatingPanel: NSPanel {
 
     init() {
         let mode = SharedStore.get("displayMode") as? Int ?? 0
-        let w: CGFloat = mode == 2 ? 420 : (mode == 0 ? 320 : 340)
-        let h: CGFloat = mode == 2 ? 340 : (mode == 0 ? 100 : 244)
+        let w: CGFloat = mode == 2 ? 340 : (mode == 0 ? 320 : 340)
+        let h: CGFloat = mode == 2 ? 280 : (mode == 0 ? 100 : 244)
         super.init(contentRect: NSRect(x: 0, y: 0, width: w, height: h),
                    styleMask: [.nonactivatingPanel, .borderless, .fullSizeContentView],
                    backing: .buffered, defer: false)
@@ -314,6 +318,7 @@ final class FloatingPanel: NSPanel {
         becomesKeyOnlyIfNeeded = true
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         appearance = NSAppearance(named: .darkAqua)
+        alphaValue = CGFloat(opacity)
         buildUI()
         positionPanel()
         startTicker()
@@ -332,10 +337,13 @@ final class FloatingPanel: NSPanel {
 
     func applyMode() {
         contentView?.subviews.forEach { $0.removeFromSuperview() }
-        dashboardWebView = nil
-        let w: CGFloat = isDashboard ? 420 : (isMini ? 320 : 340)
-        let h: CGFloat = isDashboard ? 340 : (isMini ? 100 : 244)
+        dashboardValues.removeAll()
+        chartView = nil
+        rangeControl = nil
+        let w: CGFloat = isDashboard ? 340 : (isMini ? 320 : 340)
+        let h: CGFloat = isDashboard ? 280 : (isMini ? 100 : 244)
         setContentSize(NSSize(width: w, height: h))
+        alphaValue = CGFloat(opacity)
         buildUI()
         positionPanel()
         updateFooter()
@@ -362,52 +370,121 @@ final class FloatingPanel: NSPanel {
         isMini ? buildMiniLayout(content) : buildFullLayout(content)
     }
 
-    // MARK: 看板模式（悬浮窗内嵌 Web 看板：余额 + 用量曲线）
-    private var dashboardWebView: WKWebView?
-
-    private func buildDashboardLayout(_ content: NSView) {
-        // 顶部透明拖动条（WebView 会拦截鼠标，需保留可拖动区域）
-        let dragBar = DragView(frame: NSRect(x: 0, y: content.bounds.height - 26, width: content.bounds.width, height: 26))
-        dragBar.autoresizingMask = [.width, .minYMargin]
-        content.addSubview(dragBar)
-
-        let config = WKWebViewConfiguration()
-        let controller = WKUserContentController()
-        controller.add(self, name: "log")
-        config.userContentController = controller
-        let wv = WKWebView(frame: NSRect(x: 0, y: 0, width: content.bounds.width, height: content.bounds.height - 26),
-                           configuration: config)
-        wv.autoresizingMask = [.width, .height]
-        wv.navigationDelegate = self
-        wv.setValue(false, forKey: "drawsBackground")
-        content.addSubview(wv)
-        dashboardWebView = wv
-
-        // 优先读应用 Resources/dashboard，找不到则回退到源码目录（开发态）
-        var dir = Bundle.main.resourceURL?.appendingPathComponent("dashboard")
-        if dir == nil || !FileManager.default.fileExists(atPath: dir!.path) {
-            let src = NSString(string: "~/Doubao/chats/2026-10-18/new-chat-2/deepseek-usage-app/shared/ui")
-                .expandingTildeInPath
-            if FileManager.default.fileExists(atPath: src) { dir = URL(fileURLWithPath: src) }
-        }
-        if let d = dir {
-            let index = d.appendingPathComponent("dashboard.html")
-            if FileManager.default.fileExists(atPath: index.path) {
-                wv.loadFileURL(index, allowingReadAccessTo: d)
-            }
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.injectDashboard() }
+    // MARK: 看板模式（原生小组件风格：卡片 + 迷你曲线，整窗可拖，无拖动条）
+    private var dashboardValues: [String: DragLabel] = [:]
+    private var chartView: MiniChartView?
+    private var rangeControl: NSSegmentedControl?
+    private var dashRange: Int {                       // 0=全部 7=近7天 30=近30天
+        get { SharedStore.get("dashRange") as? Int ?? 7 }
+        set { SharedStore.set("dashRange", newValue) }
     }
 
-    /// 注入余额历史到看板（幂等，随刷新调用）
-    func injectDashboard() {
-        guard let wv = dashboardWebView else { return }
-        let entries = SharedStore.historyJSON() ?? "[]"
+    private func buildDashboardLayout(_ content: NSView) {
+        // 毛玻璃背景：整窗可拖（与极简/标准一致，小组件交互）
+        let effect = DragEffectView(frame: content.bounds)
+        effect.autoresizingMask = [.width, .height]
+        effect.material = .hudWindow
+        effect.blendingMode = .behindWindow
+        effect.state = .active
+        effect.wantsLayer = true
+        effect.layer?.cornerRadius = 14
+        effect.layer?.masksToBounds = true
+        content.addSubview(effect)
+
+        // 标题 + 时间范围（分段控件）
+        let title = DragLabel(labelWithString: "DeepSeek 用量")
+        title.font = .systemFont(ofSize: 11)
+        title.textColor = .secondaryLabelColor
+        title.frame = NSRect(x: 12, y: 260, width: 110, height: 14)
+        content.addSubview(title)
+
+        let seg = NSSegmentedControl(labels: ["7天", "30天", "全部"], trackingMode: .selectOne,
+                                     target: self, action: #selector(dashRangeChanged))
+        seg.selectedSegment = dashRange == 30 ? 1 : (dashRange == 0 ? 2 : 0)
+        seg.segmentStyle = .rounded
+        seg.frame = NSRect(x: 196, y: 256, width: 132, height: 22)
+        content.addSubview(seg)
+        rangeControl = seg
+
+        // 卡片 3×2（当前余额/今日消耗/累计消耗/累计充值/记录天数/区间最高）
+        let specs: [(String, String)] = [
+            ("当前余额", "—"), ("今日消耗", "—"), ("累计消耗", "—"),
+            ("累计充值", "—"), ("记录天数", "—"), ("区间最高", "—")
+        ]
+        for (i, spec) in specs.enumerated() {
+            let col = i % 3, row = i / 3
+            let x = 12 + CGFloat(col) * 108
+            let labelY: CGFloat = row == 0 ? 222 : 168
+            let valY: CGFloat = row == 0 ? 202 : 148
+            let label = DragLabel(labelWithString: spec.0)
+            label.font = .systemFont(ofSize: 10)
+            label.textColor = .secondaryLabelColor
+            label.frame = NSRect(x: x, y: labelY, width: 100, height: 14)
+            content.addSubview(label)
+            let val = DragLabel(labelWithString: spec.1)
+            val.font = .monospacedDigitSystemFont(ofSize: 17, weight: .semibold)
+            val.textColor = .labelColor
+            val.frame = NSRect(x: x, y: valY, width: 100, height: 18)
+            content.addSubview(val)
+            dashboardValues[spec.0] = val
+        }
+
+        // 迷你余额曲线
+        let chart = MiniChartView(frame: NSRect(x: 12, y: 8, width: content.bounds.width - 24, height: 128))
+        chart.autoresizingMask = [.width]
+        content.addSubview(chart)
+        chartView = chart
+    }
+
+    @objc private func dashRangeChanged() {
+        if let s = rangeControl?.selectedSegment {
+            dashRange = s == 1 ? 30 : (s == 2 ? 0 : 7)
+        }
+        updateDashboardUI()
+    }
+
+    /// 刷新看板卡片与迷你曲线（幂等，随数据更新调用）
+    private func updateDashboardUI() {
+        guard isDashboard else { return }
+        let entries = SharedStore.historyEntries()
         let balance = SharedStore.readBalance()
-        let total = balance?["total"] as? String ?? ""
+        let total = balance?["total"] as? String ?? "—"
         let sign = balance?["sign"] as? String ?? "¥"
-        let js = "window.__DS_DATA__ = { sign: \(DashboardWindow.jsStr(sign)), current: \(DashboardWindow.jsStr(total)), entries: \(entries) }; renderDashboard();"
-        wv.evaluateJavaScript(js, completionHandler: nil)
+        dashboardValues["当前余额"]?.stringValue = "\(sign) \(total)"
+
+        // 今日消耗 / 累计消耗 / 累计充值（余额差推导）
+        var todayUsage = 0.0, cumUsage = 0.0, topup = 0.0
+        if entries.count >= 2 {
+            let dayStart = Calendar.current.startOfDay(for: Date()).timeIntervalSince1970
+            for i in 1..<entries.count {
+                let prev = Double(entries[i - 1]["total"] as? String ?? "0") ?? 0
+                let cur = Double(entries[i]["total"] as? String ?? "0") ?? 0
+                let diff = prev - cur
+                if diff > 0.001 {
+                    cumUsage += diff
+                    if (entries[i]["ts"] as? Double ?? 0) >= dayStart { todayUsage += diff }
+                } else if diff < -0.001 {
+                    topup += -diff
+                }
+            }
+        }
+        dashboardValues["今日消耗"]?.stringValue = todayUsage > 0.001 ? "\(sign) \(String(format: "%.2f", todayUsage))" : "0.00"
+        dashboardValues["累计消耗"]?.stringValue = cumUsage > 0.001 ? "\(sign) \(String(format: "%.2f", cumUsage))" : "0.00"
+        dashboardValues["累计充值"]?.stringValue = topup > 0.001 ? "\(sign) \(String(format: "%.2f", topup))" : "0.00"
+
+        let firstTs = entries.first?["ts"] as? Double ?? 0
+        let days = firstTs > 0 ? max(1, Int((Date().timeIntervalSince1970 - firstTs) / 86400)) : 0
+        dashboardValues["记录天数"]?.stringValue = days > 0 ? "\(days) 天" : "—"
+        let maxV = entries.reduce(0.0) { max($0, Double($1["total"] as? String ?? "0") ?? 0) }
+        dashboardValues["区间最高"]?.stringValue = maxV > 0 ? "\(sign) \(String(format: "%.2f", maxV))" : "—"
+
+        // 迷你曲线（按范围过滤）
+        let cutoff = dashRange > 0 ? Date().timeIntervalSince1970 - Double(dashRange) * 86400 : 0
+        let pts: [(ts: TimeInterval, total: Double)] = entries.compactMap { e in
+            guard let ts = e["ts"] as? Double, ts >= cutoff else { return nil }
+            return (ts: ts, total: Double(e["total"] as? String ?? "0") ?? 0)
+        }
+        chartView?.setPoints(pts)
     }
 
     private func buildMiniLayout(_ content: NSView) {
@@ -570,7 +647,7 @@ final class FloatingPanel: NSPanel {
     }
 
     @objc func refresh() {
-        // 看板模式：不触碰原生控件，仅拉数据 + 注入看板
+        // 看板模式：不触碰原生控件，仅拉数据 + 更新卡片/曲线
         if isDashboard {
             guard let key = SharedStore.apiKey(), !key.isEmpty else { return }
             guard let base = resolvedBaseURL() else { return }
@@ -582,7 +659,7 @@ final class FloatingPanel: NSPanel {
                         SharedStore.writeBalance(b, sign: sign)
                         SharedStore.appendHistory(total: b.total)
                     }
-                    self.injectDashboard()
+                    self.updateDashboardUI()
                 }
             }
             return
@@ -664,12 +741,14 @@ final class FloatingPanel: NSPanel {
                                    baseURL: baseURL,
                                    apiKey: SharedStore.apiKey() ?? "",
                                    interval: interval,
-                                   alwaysOnTop: alwaysOnTop)
+                                   alwaysOnTop: alwaysOnTop,
+                                   opacity: SharedStore.get("opacity") as? Double ?? 1.0)
         sheet.onSave = { [weak self] in
             guard let self = self else { return }
             self.interval = SharedStore.get("refreshInterval") as? Int ?? 60
             if self.interval <= 0 { self.interval = 60 }
             self.setAlwaysOnTop(SharedStore.get("alwaysOnTop") as? Bool ?? true)
+            self.alphaValue = CGFloat(SharedStore.get("opacity") as? Double ?? 1.0)
             // save() 已先写 SharedStore 再回调，新旧值已无法区分，故无条件重建
             self.startTicker()
             self.applyMode()
@@ -683,15 +762,70 @@ final class FloatingPanel: NSPanel {
     @objc func hidePanel() { orderOut(nil) }
 }
 
-// MARK: - 看板模式 WebView 代理
-extension FloatingPanel: WKNavigationDelegate, WKScriptMessageHandler {
-    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        injectDashboard()
+// MARK: - 迷你曲线（原生绘制：小组件风格）
+final class MiniChartView: NSView {
+    var points: [(ts: TimeInterval, total: Double)] = []
+    private let lineColor = NSColor.systemTeal
+
+    func setPoints(_ p: [(ts: TimeInterval, total: Double)]) {
+        points = p
+        needsDisplay = true
     }
-    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-        if message.name == "log" {
-            NSLog("PanelJS: \(String(describing: message.body))")
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard points.count >= 2 else {
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: 10),
+                .foregroundColor: NSColor.tertiaryLabelColor
+            ]
+            ("暂无数据，等待记录…" as NSString).draw(at: NSPoint(x: 8, y: bounds.height / 2 - 6), withAttributes: attrs)
+            return
         }
+        let vals = points.map { $0.total }
+        let minV = vals.min() ?? 0
+        let maxV = vals.max() ?? 1
+        let span = max(maxV - minV, 0.0001)
+        let w = bounds.width
+        let h = bounds.height
+
+        // 底部基线
+        NSColor.white.withAlphaComponent(0.08).setStroke()
+        let base = NSBezierPath()
+        base.move(to: NSPoint(x: 0, y: 0.5))
+        base.line(to: NSPoint(x: w, y: 0.5))
+        base.lineWidth = 0.5
+        base.stroke()
+
+        let mapped: [NSPoint] = points.enumerated().map { i, p in
+            let x = CGFloat(i) / CGFloat(points.count - 1) * w
+            let y = CGFloat((p.total - minV) / span) * (h - 14) + 7
+            return NSPoint(x: x, y: y)
+        }
+
+        // 面积填充
+        let fill = NSBezierPath()
+        fill.move(to: mapped[0])
+        for p in mapped.dropFirst() { fill.line(to: p) }
+        fill.line(to: NSPoint(x: mapped.last!.x, y: 0))
+        fill.line(to: NSPoint(x: mapped.first!.x, y: 0))
+        fill.close()
+        lineColor.withAlphaComponent(0.16).setFill()
+        fill.fill()
+
+        // 折线
+        let path = NSBezierPath()
+        path.move(to: mapped[0])
+        for p in mapped.dropFirst() { path.line(to: p) }
+        path.lineWidth = 1.5
+        path.lineCapStyle = .round
+        lineColor.setStroke()
+        path.stroke()
+
+        // 末点
+        let last = mapped.last!
+        let dot = NSBezierPath(ovalIn: NSRect(x: last.x - 2.5, y: last.y - 2.5, width: 5, height: 5))
+        lineColor.setFill()
+        dot.fill()
     }
 }
 
@@ -705,20 +839,22 @@ final class SettingsWindow: NSWindow {
     private let baseField = NSTextField(frame: NSRect(x: 114, y: 152, width: 240, height: 24))
     private let intervalPopup = NSPopUpButton(frame: NSRect(x: 124, y: 110, width: 120, height: 26), pullsDown: false)
     private let topCheck = NSButton(checkboxWithTitle: "窗口始终置顶", target: nil, action: nil)
+    private let opacitySlider = NSSlider(value: 1.0, minValue: 0.5, maxValue: 1.0, target: nil, action: nil)
+    private let opacityValue = NSTextField(labelWithString: "100%")
     private let intervals = [15, 30, 60, 120, 300]
 
-    init(displayMode: Int, sourceType: Int, baseURL: String, apiKey: String, interval: Int, alwaysOnTop: Bool) {
-        super.init(contentRect: NSRect(x: 0, y: 0, width: 380, height: 348),
+    init(displayMode: Int, sourceType: Int, baseURL: String, apiKey: String, interval: Int, alwaysOnTop: Bool, opacity: Double) {
+        super.init(contentRect: NSRect(x: 0, y: 0, width: 380, height: 392),
                    styleMask: [.titled, .closable], backing: .buffered, defer: false)
         title = "DeepSeek 用量面板 · 设置"
         isReleasedWhenClosed = false
         appearance = NSAppearance(named: .darkAqua)
         buildUI(displayMode: displayMode, sourceType: sourceType, baseURL: baseURL,
-                apiKey: apiKey, interval: interval, alwaysOnTop: alwaysOnTop)
+                apiKey: apiKey, interval: interval, alwaysOnTop: alwaysOnTop, opacity: opacity)
     }
 
     private func buildUI(displayMode: Int, sourceType: Int, baseURL: String,
-                         apiKey: String, interval: Int, alwaysOnTop: Bool) {
+                         apiKey: String, interval: Int, alwaysOnTop: Bool, opacity: Double) {
         let content = contentView!
         let labelFont = NSFont.systemFont(ofSize: 12)
         let labelColor = NSColor.secondaryLabelColor
@@ -787,10 +923,24 @@ final class SettingsWindow: NSWindow {
         content.addSubview(intervalPopup)
 
         // 窗口置顶
-        content.addSubview(label("窗口置顶", NSRect(x: 20, y: 88, width: 90, height: 20)))
+        content.addSubview(label("窗口置顶", NSRect(x: 20, y: 128, width: 90, height: 20)))
         topCheck.state = alwaysOnTop ? .on : .off
-        topCheck.frame = NSRect(x: 112, y: 86, width: 160, height: 20)
+        topCheck.frame = NSRect(x: 112, y: 126, width: 160, height: 20)
         content.addSubview(topCheck)
+
+        // 面板透明度
+        content.addSubview(label("面板透明度", NSRect(x: 20, y: 88, width: 90, height: 20)))
+        opacitySlider.doubleValue = max(0.5, min(1.0, opacity))
+        opacitySlider.isContinuous = true
+        opacitySlider.target = self
+        opacitySlider.action = #selector(opacityChanged)
+        opacitySlider.frame = NSRect(x: 112, y: 86, width: 150, height: 20)
+        content.addSubview(opacitySlider)
+        opacityValue.font = .systemFont(ofSize: 12)
+        opacityValue.textColor = .secondaryLabelColor
+        opacityValue.frame = NSRect(x: 268, y: 88, width: 52, height: 20)
+        opacityValue.stringValue = "\(Int(round(opacity * 100)))%"
+        content.addSubview(opacityValue)
 
         // 说明
         let hint = NSTextField(labelWithString: "Key 仅保存在本机「钥匙串」。官方接口 api.deepseek.com/user/balance；自定义网关自动探测 /user/balance 与 /v1/user/balance（兼容 new-api / one-api 等 OpenAI 风格网关）。")
@@ -823,6 +973,10 @@ final class SettingsWindow: NSWindow {
         baseField.isEnabled = (sourcePopup.selectedTag() == 1)
     }
 
+    @objc private func opacityChanged() {
+        opacityValue.stringValue = "\(Int(round(opacitySlider.doubleValue * 100)))%"
+    }
+
     @objc private func save() {
         let key = keyField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         _ = KeychainStore.set(key, for: "apiKey")   // 兜底写钥匙串
@@ -837,6 +991,7 @@ final class SettingsWindow: NSWindow {
         let tag = intervalPopup.selectedTag()
         SharedStore.set("refreshInterval", tag > 0 ? tag : 60)
         SharedStore.set("alwaysOnTop", topCheck.state == .on)
+        SharedStore.set("opacity", opacitySlider.doubleValue)
         close()
         onSave?()
     }

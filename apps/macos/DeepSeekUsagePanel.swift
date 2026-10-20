@@ -249,6 +249,51 @@ final class DragEffectView: NSVisualEffectView {
     override var mouseDownCanMoveWindow: Bool { true }
 }
 
+// MARK: - 主题色（Apple 系统色板，参考系统小组件）
+extension NSColor {
+    convenience init(hex: String) {
+        var h = hex.trimmingCharacters(in: .whitespacesAndNewlines)
+        if h.hasPrefix("#") { h.removeFirst() }
+        var v: UInt64 = 0
+        Scanner(string: h).scanHexInt64(&v)
+        self.init(srgbRed: CGFloat((v >> 16) & 0xff) / 255,
+                  green: CGFloat((v >> 8) & 0xff) / 255,
+                  blue: CGFloat(v & 0xff) / 255, alpha: 1)
+    }
+}
+
+enum AccentTheme: Int, CaseIterable {
+    case blue, graphite, green, orange, purple, pink, teal, red
+
+    var name: String {
+        switch self {
+        case .blue:     return "系统蓝"
+        case .graphite: return "石墨灰"
+        case .green:    return "绿色"
+        case .orange:   return "橙色"
+        case .purple:   return "紫罗兰"
+        case .pink:     return "粉色"
+        case .teal:     return "青色"
+        case .red:      return "红色"
+        }
+    }
+
+    var hex: String {
+        switch self {
+        case .blue:     return "#0A84FF"
+        case .graphite: return "#98989D"
+        case .green:    return "#30D158"
+        case .orange:   return "#FF9F0A"
+        case .purple:   return "#BF5AF2"
+        case .pink:     return "#FF375F"
+        case .teal:     return "#64D2FF"
+        case .red:      return "#FF453A"
+        }
+    }
+
+    var color: NSColor { NSColor(hex: hex) }
+}
+
 // MARK: - 悬浮面板
 final class FloatingPanel: NSPanel {
     private let api = BalanceAPI()
@@ -287,6 +332,12 @@ final class FloatingPanel: NSPanel {
     private var opacity: Double {                    // 面板透明度 0.5~1.0
         get { SharedStore.get("opacity") as? Double ?? 1.0 }
         set { SharedStore.set("opacity", newValue) }
+    }
+    private var accent: Int {                        // 主题色 id（AccentTheme）
+        get { SharedStore.get("accent") as? Int ?? 0 }
+    }
+    private var accentColor: NSColor {
+        AccentTheme(rawValue: accent)?.color ?? AccentTheme.blue.color
     }
 
     // UI 元素（随模式重建）
@@ -402,6 +453,7 @@ final class FloatingPanel: NSPanel {
                                      target: self, action: #selector(dashRangeChanged))
         seg.selectedSegment = dashRange == 30 ? 1 : (dashRange == 0 ? 2 : 0)
         seg.segmentStyle = .rounded
+        if #available(macOS 11.0, *) { seg.selectedSegmentBezelColor = accentColor }
         seg.frame = NSRect(x: 196, y: 256, width: 132, height: 22)
         content.addSubview(seg)
         rangeControl = seg
@@ -423,7 +475,7 @@ final class FloatingPanel: NSPanel {
             content.addSubview(label)
             let val = DragLabel(labelWithString: spec.1)
             val.font = .monospacedDigitSystemFont(ofSize: 17, weight: .semibold)
-            val.textColor = .labelColor
+            val.textColor = spec.0 == "当前余额" ? accentColor : .labelColor
             val.frame = NSRect(x: x, y: valY, width: 100, height: 18)
             content.addSubview(val)
             dashboardValues[spec.0] = val
@@ -432,6 +484,7 @@ final class FloatingPanel: NSPanel {
         // 迷你余额曲线
         let chart = MiniChartView(frame: NSRect(x: 12, y: 8, width: content.bounds.width - 24, height: 128))
         chart.autoresizingMask = [.width]
+        chart.lineColor = accentColor
         content.addSubview(chart)
         chartView = chart
     }
@@ -508,7 +561,7 @@ final class FloatingPanel: NSPanel {
         // 总余额大字
         totalValue = DragLabel(labelWithString: "—")
         totalValue.font = .monospacedDigitSystemFont(ofSize: 22, weight: .semibold)
-        totalValue.textColor = .labelColor
+        totalValue.textColor = accentColor
         totalValue.frame = NSRect(x: 12, y: 38, width: 296, height: 32)
 
         // 底部：倒计时 + 按钮
@@ -559,7 +612,7 @@ final class FloatingPanel: NSPanel {
 
         totalValue = DragLabel(labelWithString: "—")
         totalValue.font = .monospacedDigitSystemFont(ofSize: 16, weight: .semibold)
-        totalValue.textColor = .labelColor
+        totalValue.textColor = accentColor
         totalValue.alignment = .right
         totalValue.frame = NSRect(x: 180, y: 166, width: 144, height: 24)
 
@@ -700,7 +753,7 @@ final class FloatingPanel: NSPanel {
         if let t = b.toppedUp { toppedValue?.stringValue = "\(sign) \(t)" }
 
         let total = Double(b.total) ?? 0
-        totalValue.textColor = total < 5 ? .systemRed : (total < 20 ? .systemOrange : .labelColor)
+        totalValue.textColor = total < 5 ? .systemRed : (total < 20 ? .systemOrange : accentColor)
         grantedValue?.textColor = .secondaryLabelColor
         toppedValue?.textColor = .secondaryLabelColor
 
@@ -742,7 +795,8 @@ final class FloatingPanel: NSPanel {
                                    apiKey: SharedStore.apiKey() ?? "",
                                    interval: interval,
                                    alwaysOnTop: alwaysOnTop,
-                                   opacity: SharedStore.get("opacity") as? Double ?? 1.0)
+                                   opacity: SharedStore.get("opacity") as? Double ?? 1.0,
+                                   accent: SharedStore.get("accent") as? Int ?? 0)
         sheet.onSave = { [weak self] in
             guard let self = self else { return }
             self.interval = SharedStore.get("refreshInterval") as? Int ?? 60
@@ -765,7 +819,7 @@ final class FloatingPanel: NSPanel {
 // MARK: - 迷你曲线（原生绘制：小组件风格）
 final class MiniChartView: NSView {
     var points: [(ts: TimeInterval, total: Double)] = []
-    private let lineColor = NSColor.systemTeal
+    var lineColor: NSColor = .systemTeal
 
     func setPoints(_ p: [(ts: TimeInterval, total: Double)]) {
         points = p
@@ -832,29 +886,33 @@ final class MiniChartView: NSView {
 // MARK: - 设置面板
 final class SettingsWindow: NSWindow {
     var onSave: (() -> Void)?
-    private let keyField = NSSecureTextField(frame: NSRect(x: 88, y: 280, width: 200, height: 24))
+    private let keyField = NSSecureTextField(frame: NSRect(x: 88, y: 326, width: 200, height: 24))
     private let showKey = NSButton(checkboxWithTitle: "显示", target: nil, action: nil)
-    private let modePopup = NSPopUpButton(frame: NSRect(x: 114, y: 236, width: 170, height: 26), pullsDown: false)
-    private let sourcePopup = NSPopUpButton(frame: NSRect(x: 114, y: 194, width: 170, height: 26), pullsDown: false)
-    private let baseField = NSTextField(frame: NSRect(x: 114, y: 152, width: 240, height: 24))
-    private let intervalPopup = NSPopUpButton(frame: NSRect(x: 124, y: 110, width: 120, height: 26), pullsDown: false)
+    private let modePopup = NSPopUpButton(frame: NSRect(x: 114, y: 282, width: 170, height: 26), pullsDown: false)
+    private let sourcePopup = NSPopUpButton(frame: NSRect(x: 114, y: 240, width: 170, height: 26), pullsDown: false)
+    private let baseField = NSTextField(frame: NSRect(x: 114, y: 198, width: 240, height: 24))
+    private let intervalPopup = NSPopUpButton(frame: NSRect(x: 124, y: 156, width: 120, height: 26), pullsDown: false)
     private let topCheck = NSButton(checkboxWithTitle: "窗口始终置顶", target: nil, action: nil)
     private let opacitySlider = NSSlider(value: 1.0, minValue: 0.5, maxValue: 1.0, target: nil, action: nil)
     private let opacityValue = NSTextField(labelWithString: "100%")
+    private var accentButtons: [NSButton] = []
+    private var currentAccent: Int = 0
     private let intervals = [15, 30, 60, 120, 300]
 
-    init(displayMode: Int, sourceType: Int, baseURL: String, apiKey: String, interval: Int, alwaysOnTop: Bool, opacity: Double) {
-        super.init(contentRect: NSRect(x: 0, y: 0, width: 380, height: 392),
+    init(displayMode: Int, sourceType: Int, baseURL: String, apiKey: String, interval: Int, alwaysOnTop: Bool, opacity: Double, accent: Int) {
+        super.init(contentRect: NSRect(x: 0, y: 0, width: 380, height: 420),
                    styleMask: [.titled, .closable], backing: .buffered, defer: false)
         title = "DeepSeek 用量面板 · 设置"
         isReleasedWhenClosed = false
         appearance = NSAppearance(named: .darkAqua)
         buildUI(displayMode: displayMode, sourceType: sourceType, baseURL: baseURL,
-                apiKey: apiKey, interval: interval, alwaysOnTop: alwaysOnTop, opacity: opacity)
+                apiKey: apiKey, interval: interval, alwaysOnTop: alwaysOnTop,
+                opacity: opacity, accent: accent)
     }
 
     private func buildUI(displayMode: Int, sourceType: Int, baseURL: String,
-                         apiKey: String, interval: Int, alwaysOnTop: Bool, opacity: Double) {
+                         apiKey: String, interval: Int, alwaysOnTop: Bool,
+                         opacity: Double, accent: Int) {
         let content = contentView!
         let labelFont = NSFont.systemFont(ofSize: 12)
         let labelColor = NSColor.secondaryLabelColor
@@ -868,18 +926,18 @@ final class SettingsWindow: NSWindow {
         }
 
         // API Key
-        content.addSubview(label("API Key", NSRect(x: 20, y: 284, width: 64, height: 20)))
+        content.addSubview(label("API Key", NSRect(x: 20, y: 330, width: 64, height: 20)))
         keyField.stringValue = apiKey
         keyField.placeholderString = "sk-…"
         keyField.font = .systemFont(ofSize: 12)
         content.addSubview(keyField)
         showKey.target = self
         showKey.action = #selector(toggleKeyVisible)
-        showKey.frame = NSRect(x: 296, y: 282, width: 68, height: 20)
+        showKey.frame = NSRect(x: 296, y: 328, width: 68, height: 20)
         content.addSubview(showKey)
 
         // 显示模式
-        content.addSubview(label("显示模式", NSRect(x: 20, y: 240, width: 90, height: 20)))
+        content.addSubview(label("显示模式", NSRect(x: 20, y: 286, width: 90, height: 20)))
         modePopup.removeAllItems()
         modePopup.addItem(withTitle: "极简 · 只显示总余额")
         modePopup.lastItem?.tag = 0
@@ -892,7 +950,7 @@ final class SettingsWindow: NSWindow {
         content.addSubview(modePopup)
 
         // 数据源
-        content.addSubview(label("数据源", NSRect(x: 20, y: 198, width: 90, height: 20)))
+        content.addSubview(label("数据源", NSRect(x: 20, y: 244, width: 90, height: 20)))
         sourcePopup.removeAllItems()
         sourcePopup.addItem(withTitle: "DeepSeek 官方 API")
         sourcePopup.lastItem?.tag = 0
@@ -905,7 +963,7 @@ final class SettingsWindow: NSWindow {
         content.addSubview(sourcePopup)
 
         // 网关地址
-        content.addSubview(label("网关地址", NSRect(x: 20, y: 156, width: 90, height: 20)))
+        content.addSubview(label("网关地址", NSRect(x: 20, y: 202, width: 90, height: 20)))
         baseField.stringValue = baseURL
         baseField.placeholderString = "https://your-gateway.com（可选 /v1）"
         baseField.font = .systemFont(ofSize: 12)
@@ -913,7 +971,7 @@ final class SettingsWindow: NSWindow {
         content.addSubview(baseField)
 
         // 刷新间隔
-        content.addSubview(label("自动刷新间隔", NSRect(x: 20, y: 114, width: 100, height: 20)))
+        content.addSubview(label("自动刷新间隔", NSRect(x: 20, y: 160, width: 100, height: 20)))
         for iv in intervals {
             intervalPopup.addItem(withTitle: "\(iv) 秒")
             intervalPopup.lastItem?.tag = iv
@@ -942,27 +1000,49 @@ final class SettingsWindow: NSWindow {
         opacityValue.stringValue = "\(Int(round(opacity * 100)))%"
         content.addSubview(opacityValue)
 
-        // 说明
-        let hint = NSTextField(labelWithString: "Key 仅保存在本机「钥匙串」。官方接口 api.deepseek.com/user/balance；自定义网关自动探测 /user/balance 与 /v1/user/balance（兼容 new-api / one-api 等 OpenAI 风格网关）。")
-        hint.font = .systemFont(ofSize: 10)
-        hint.textColor = .tertiaryLabelColor
-        hint.maximumNumberOfLines = 0
-        hint.lineBreakMode = .byWordWrapping
-        hint.frame = NSRect(x: 20, y: 46, width: 340, height: 36)
-        content.addSubview(hint)
+        // 主题色（Apple 系统色板）
+        content.addSubview(label("主题色", NSRect(x: 20, y: 54, width: 90, height: 20)))
+        currentAccent = accent
+        for (i, t) in AccentTheme.allCases.enumerated() {
+            let x = 112 + CGFloat(i) * 30
+            let b = NSButton(title: "", target: self, action: #selector(accentPicked(_:)))
+            b.tag = i
+            b.isBordered = false
+            b.wantsLayer = true
+            b.layer?.backgroundColor = t.color.cgColor
+            b.layer?.cornerRadius = 10
+            b.layer?.masksToBounds = true
+            b.frame = NSRect(x: x, y: 50, width: 20, height: 20)
+            b.toolTip = t.name
+            content.addSubview(b)
+            accentButtons.append(b)
+        }
+        updateAccentSelection()
 
         // 按钮
         let cancelButton = NSButton(title: "取消", target: self, action: #selector(cancel))
         cancelButton.bezelStyle = .rounded
         cancelButton.keyEquivalent = "\u{1b}"
-        cancelButton.frame = NSRect(x: 196, y: 20, width: 82, height: 30)
+        cancelButton.frame = NSRect(x: 196, y: 12, width: 82, height: 30)
         content.addSubview(cancelButton)
 
         let saveButton = NSButton(title: "保存", target: self, action: #selector(save))
         saveButton.bezelStyle = .rounded
         saveButton.keyEquivalent = "\r"
-        saveButton.frame = NSRect(x: 284, y: 20, width: 76, height: 30)
+        saveButton.frame = NSRect(x: 284, y: 12, width: 76, height: 30)
         content.addSubview(saveButton)
+    }
+
+    @objc private func accentPicked(_ sender: NSButton) {
+        currentAccent = sender.tag
+        updateAccentSelection()
+    }
+
+    private func updateAccentSelection() {
+        for (i, b) in accentButtons.enumerated() {
+            b.layer?.borderWidth = (i == currentAccent) ? 2.5 : 0
+            b.layer?.borderColor = (i == currentAccent) ? NSColor.white.cgColor : NSColor.clear.cgColor
+        }
     }
 
     @objc private func toggleKeyVisible() {
@@ -992,6 +1072,7 @@ final class SettingsWindow: NSWindow {
         SharedStore.set("refreshInterval", tag > 0 ? tag : 60)
         SharedStore.set("alwaysOnTop", topCheck.state == .on)
         SharedStore.set("opacity", opacitySlider.doubleValue)
+        SharedStore.set("accent", currentAccent)
         close()
         onSave?()
     }
@@ -1051,7 +1132,8 @@ final class DashboardWindow: NSWindow, WKNavigationDelegate, WKScriptMessageHand
         let balance = SharedStore.readBalance()
         let total = balance?["total"] as? String ?? ""
         let sign = balance?["sign"] as? String ?? "¥"
-        let js = "window.__DS_DATA__ = { sign: \(Self.jsStr(sign)), current: \(Self.jsStr(total)), entries: \(entries) }; console.log('injected', JSON.stringify(window.__DS_DATA__).slice(0, 300)); renderDashboard();"
+        let accent = AccentTheme(rawValue: SharedStore.get("accent") as? Int ?? 0)?.hex ?? "#0A84FF"
+        let js = "window.__DS_DATA__ = { sign: \(Self.jsStr(sign)), current: \(Self.jsStr(total)), entries: \(entries), accent: \(Self.jsStr(accent)) }; console.log('injected', JSON.stringify(window.__DS_DATA__).slice(0, 300)); renderDashboard();"
         webView.evaluateJavaScript(js, completionHandler: nil)
     }
 

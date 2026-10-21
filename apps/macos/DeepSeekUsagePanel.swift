@@ -377,6 +377,7 @@ final class FloatingPanel: NSPanel {
     private var refreshButton: NSButton!
     private var settingsButton: NSButton!
     private var quitButton: NSButton!
+    private var pinButton: NSButton!
 
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
@@ -388,7 +389,9 @@ final class FloatingPanel: NSPanel {
         switch mode {
         case 0: h = 100
         case 1: h = 244
-        default: h = hasChart ? 280 : 210
+        default:
+            let twoRows = (SharedStore.get("dashCards") as? [Int] ?? [0, 1, 2, 3, 4, 5]).count <= 3
+            h = hasChart ? (twoRows ? 232 : 280) : (twoRows ? 150 : 210)
         }
         let w: CGFloat = mode == 2 ? 340 : (mode == 0 ? 320 : 340)
         super.init(contentRect: NSRect(x: 0, y: 0, width: w, height: h),
@@ -417,6 +420,37 @@ final class FloatingPanel: NSPanel {
     func setAlwaysOnTop(_ on: Bool) {
         isFloatingPanel = on
         level = on ? .floating : .normal
+        SharedStore.set("alwaysOnTop", on)
+        updatePinIcon()
+    }
+
+    /// 看板卡片行数（≤3 张 1 行，否则 2 行）→ 面板自适应高度
+    private func dashboardRows() -> Int { dashCards.count <= 3 ? 1 : 2 }
+    private func dashboardHeight() -> CGFloat {
+        let twoRows = dashboardRows() == 2
+        if showChart { return twoRows ? 280 : 232 }
+        return twoRows ? 210 : 150
+    }
+
+    /// 置顶小开关（面板右上角）
+    @objc private func togglePin() {
+        setAlwaysOnTop(!alwaysOnTop)
+    }
+    private func updatePinIcon() {
+        guard pinButton != nil else { return }
+        if #available(macOS 11.0, *) {
+            pinButton.image = NSImage(systemSymbolName: alwaysOnTop ? "pin.fill" : "pin",
+                                      accessibilityDescription: "置顶")
+        }
+        pinButton.contentTintColor = alwaysOnTop ? accentColor : .secondaryLabelColor
+        pinButton.toolTip = alwaysOnTop ? "取消置顶" : "窗口置顶"
+    }
+    private func makePinButton() -> NSButton {
+        let b = NSButton(title: "", target: self, action: #selector(togglePin))
+        b.isBordered = false
+        b.wantsLayer = true
+        b.frame = NSRect(x: 0, y: 0, width: 20, height: 20)
+        return b
     }
 
     func applyMode() {
@@ -425,7 +459,7 @@ final class FloatingPanel: NSPanel {
         chartView = nil
         rangeControl = nil
         let w: CGFloat = isDashboard ? 340 : (isMini ? 320 : 340)
-        let h: CGFloat = isDashboard ? (showChart ? 280 : 210) : (isMini ? 100 : 244)
+        let h: CGFloat = isDashboard ? dashboardHeight() : (isMini ? 100 : 244)
         setContentSize(NSSize(width: w, height: h))
         alphaValue = CGFloat(opacity)
         buildUI()
@@ -478,12 +512,13 @@ final class FloatingPanel: NSPanel {
         effect.layer?.masksToBounds = true
         content.addSubview(effect)
 
-        // 标题 + 时间范围（分段控件）——坐标随是否显示曲线调整
+        // 标题 + 时间范围（分段控件）+ 置顶开关——坐标随卡片行数/曲线开关自适应
         let hasChart = showChart
-        let titleY: CGFloat = hasChart ? 260 : 160
-        let segY: CGFloat = hasChart ? 256 : 156
-        let row1LabelY: CGFloat = hasChart ? 222 : 116
-        let row1ValY: CGFloat = hasChart ? 202 : 98
+        let twoRows = dashboardRows() == 2
+        let titleY: CGFloat = hasChart ? (twoRows ? 260 : 194) : (twoRows ? 160 : 118)
+        let segY: CGFloat = hasChart ? (twoRows ? 256 : 190) : (twoRows ? 156 : 114)
+        let row1LabelY: CGFloat = hasChart ? (twoRows ? 222 : 168) : (twoRows ? 116 : 72)
+        let row1ValY: CGFloat = hasChart ? (twoRows ? 202 : 150) : (twoRows ? 98 : 54)
         let row2LabelY: CGFloat = hasChart ? 168 : 62
         let row2ValY: CGFloat = hasChart ? 148 : 44
 
@@ -498,9 +533,15 @@ final class FloatingPanel: NSPanel {
         seg.selectedSegment = dashRange == 30 ? 1 : (dashRange == 0 ? 2 : 0)
         seg.segmentStyle = .rounded
         if #available(macOS 11.0, *) { seg.selectedSegmentBezelColor = accentColor }
-        seg.frame = NSRect(x: 196, y: segY, width: 132, height: 22)
+        seg.frame = NSRect(x: 196, y: segY, width: 110, height: 22)
         content.addSubview(seg)
         rangeControl = seg
+
+        // 置顶小开关（右上角）
+        pinButton = makePinButton()
+        pinButton.frame = NSRect(x: 312, y: segY + 2, width: 20, height: 20)
+        content.addSubview(pinButton)
+        updatePinIcon()
 
         // 卡片（按用户勾选显示；最多 6 张，3 列）
         let allSpecs: [(Int, String)] = [
@@ -652,6 +693,12 @@ final class FloatingPanel: NSPanel {
         statusLabel.font = .systemFont(ofSize: 12)
         statusLabel.textColor = .secondaryLabelColor
         statusLabel.frame = NSRect(x: 306, y: 214, width: 90, height: 16)
+
+        // 置顶小开关（右上角）
+        pinButton = makePinButton()
+        pinButton.frame = NSRect(x: 266, y: 212, width: 20, height: 20)
+        content.addSubview(pinButton)
+        updatePinIcon()
 
         let divider = DragView()
         divider.wantsLayer = true

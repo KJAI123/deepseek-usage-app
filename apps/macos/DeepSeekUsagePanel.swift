@@ -1368,7 +1368,7 @@ final class SettingsWindow: NSWindow {
 
 // MARK: - 看板窗口（余额历史曲线，加载 shared/ui 的 Web 看板）
 final class DashboardWindow: NSWindow, WKNavigationDelegate, WKScriptMessageHandler {
-    private var webView: WKWebView!
+    private var webView: WKWebView?
     private var loaded = false
 
     init() {
@@ -1383,11 +1383,21 @@ final class DashboardWindow: NSWindow, WKNavigationDelegate, WKScriptMessageHand
         let controller = WKUserContentController()
         controller.add(self, name: "log")
         config.userContentController = controller
-        webView = WKWebView(frame: contentView!.bounds, configuration: config)
-        webView.autoresizingMask = [.width, .height]
-        webView.navigationDelegate = self
-        contentView?.addSubview(webView)
+        let wv = WKWebView(frame: contentView!.bounds, configuration: config)
+        wv.autoresizingMask = [.width, .height]
+        wv.navigationDelegate = self
+        contentView?.addSubview(wv)
+        webView = wv
         center()
+    }
+
+    /// 关闭时彻底释放 WebView，让 WebContent 进程退出，内存回落
+    func teardown() {
+        webView?.stopLoading()
+        webView?.navigationDelegate = nil
+        webView?.removeFromSuperview()
+        webView = nil
+        loaded = false
     }
 
     func loadDashboard() {
@@ -1402,7 +1412,7 @@ final class DashboardWindow: NSWindow, WKNavigationDelegate, WKScriptMessageHand
         let index = d.appendingPathComponent("dashboard.html")
         guard FileManager.default.fileExists(atPath: index.path) else { return }
         loaded = false
-        webView.loadFileURL(index, allowingReadAccessTo: d)
+        webView?.loadFileURL(index, allowingReadAccessTo: d)
     }
 
     func refreshData() {
@@ -1413,7 +1423,7 @@ final class DashboardWindow: NSWindow, WKNavigationDelegate, WKScriptMessageHand
         let sign = balance?["sign"] as? String ?? "¥"
         let accent = AccentTheme(rawValue: SharedStore.get("accent") as? Int ?? 0)?.hex ?? "#0A84FF"
         let js = "window.__DS_DATA__ = { sign: \(Self.jsStr(sign)), current: \(Self.jsStr(total)), topped: \(Self.jsStr(topped)), entries: \(entries), accent: \(Self.jsStr(accent)) }; console.log('injected', JSON.stringify(window.__DS_DATA__).slice(0, 300)); renderDashboard();"
-        webView.evaluateJavaScript(js, completionHandler: nil)
+        webView?.evaluateJavaScript(js, completionHandler: nil)
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
@@ -1437,7 +1447,7 @@ final class DashboardWindow: NSWindow, WKNavigationDelegate, WKScriptMessageHand
 // MARK: - 入口（菜单栏常驻 + 悬浮面板）
 import ServiceManagement
 
-final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDelegate {
     private var statusItem: NSStatusItem?
     private var panel: FloatingPanel?
     private var dashboard: DashboardWindow?
@@ -1513,6 +1523,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func openDashboard() {
         if dashboard == nil {
             let w = DashboardWindow()
+            w.delegate = self
             dashboard = w
             w.loadDashboard()
         }
@@ -1526,6 +1537,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
             self?.dashboard?.refreshData()
         }
+    }
+
+    // 看板窗口关闭时彻底释放（WebContent 进程随之退出，内存回落）
+    func windowWillClose(_ notification: Notification) {
+        guard let w = notification.object as? DashboardWindow else { return }
+        w.teardown()
+        if dashboard === w { dashboard = nil }
     }
 
     @objc private func toggleLaunchAtLogin() {

@@ -5,6 +5,7 @@
 import Cocoa
 import Security
 import WebKit
+import UserNotifications
 
 // MARK: - 钥匙串（API Key 兜底存储，沙箱后以 SharedStore 为主）
 enum KeychainStore {
@@ -140,6 +141,12 @@ enum SharedStore {
     static func historyJSON() -> String? {
         guard let data = try? JSONSerialization.data(withJSONObject: historyEntries()) else { return nil }
         return String(data: data, encoding: .utf8)
+    }
+
+    /// 清除余额历史（保留当前余额）
+    static func clearHistory() {
+        let url = dirURL().appendingPathComponent("history.json")
+        try? FileManager.default.removeItem(at: url)
     }
 }
 
@@ -339,6 +346,26 @@ final class FloatingPanel: NSPanel {
     private var accentColor: NSColor {
         AccentTheme(rawValue: accent)?.color ?? AccentTheme.blue.color
     }
+    private var appearanceMode: Int {                // 0=跟随系统 1=深色 2=浅色
+        get { SharedStore.get("appearanceMode") as? Int ?? 0 }
+    }
+    private var dashCards: [Int] {                   // 看板显示卡片 id 列表
+        get { SharedStore.get("dashCards") as? [Int] ?? [0, 1, 2, 3, 4, 5] }
+    }
+    private var lowBalanceAlert: Bool {
+        get { SharedStore.get("lowBalanceAlert") as? Bool ?? false }
+    }
+    private var lowBalanceThreshold: Double {
+        get { SharedStore.get("lowBalanceThreshold") as? Double ?? 10.0 }
+    }
+
+    private func applyAppearance() {
+        switch appearanceMode {
+        case 1: appearance = NSAppearance(named: .darkAqua)
+        case 2: appearance = NSAppearance(named: .aqua)
+        default: appearance = nil                    // 跟随系统
+        }
+    }
 
     // UI 元素（随模式重建）
     private var statusDot: DragView!
@@ -368,7 +395,7 @@ final class FloatingPanel: NSPanel {
         isMovableByWindowBackground = true
         becomesKeyOnlyIfNeeded = true
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        appearance = NSAppearance(named: .darkAqua)
+        applyAppearance()
         alphaValue = CGFloat(opacity)
         buildUI()
         positionPanel()
@@ -458,27 +485,30 @@ final class FloatingPanel: NSPanel {
         content.addSubview(seg)
         rangeControl = seg
 
-        // 卡片 3×2（当前余额/今日消耗/累计消耗/累计充值/记录天数/区间最高）
-        let specs: [(String, String)] = [
-            ("当前余额", "—"), ("今日消耗", "—"), ("累计消耗", "—"),
-            ("累计充值", "—"), ("记录天数", "—"), ("区间最高", "—")
+        // 卡片（按用户勾选显示；最多 6 张，3 列）
+        let allSpecs: [(Int, String)] = [
+            (0, "当前余额"), (1, "今日消耗"), (2, "累计消耗"),
+            (3, "累计充值"), (4, "记录天数"), (5, "区间最高")
         ]
+        let specs = allSpecs.filter { dashCards.contains($0.0) }
+        let cols = min(3, max(1, specs.count))
+        let cardW: CGFloat = (content.bounds.width - 24 - CGFloat(cols - 1) * 8) / CGFloat(cols)
         for (i, spec) in specs.enumerated() {
-            let col = i % 3, row = i / 3
-            let x = 12 + CGFloat(col) * 108
+            let col = i % cols, row = i / cols
+            let x = 12 + CGFloat(col) * (cardW + 8)
             let labelY: CGFloat = row == 0 ? 222 : 168
             let valY: CGFloat = row == 0 ? 202 : 148
-            let label = DragLabel(labelWithString: spec.0)
+            let label = DragLabel(labelWithString: spec.1)
             label.font = .systemFont(ofSize: 10)
             label.textColor = .secondaryLabelColor
-            label.frame = NSRect(x: x, y: labelY, width: 100, height: 14)
+            label.frame = NSRect(x: x, y: labelY, width: cardW, height: 14)
             content.addSubview(label)
-            let val = DragLabel(labelWithString: spec.1)
+            let val = DragLabel(labelWithString: "—")
             val.font = .monospacedDigitSystemFont(ofSize: 17, weight: .semibold)
-            val.textColor = spec.0 == "当前余额" ? accentColor : .labelColor
-            val.frame = NSRect(x: x, y: valY, width: 100, height: 18)
+            val.textColor = spec.1 == "当前余额" ? accentColor : .labelColor
+            val.frame = NSRect(x: x, y: valY, width: cardW, height: 18)
             content.addSubview(val)
-            dashboardValues[spec.0] = val
+            dashboardValues[spec.1] = val
         }
 
         // 迷你余额曲线
@@ -767,7 +797,27 @@ final class FloatingPanel: NSPanel {
         lastUpdated = Self.timeFormatter.string(from: Date())
         SharedStore.writeBalance(b, sign: sign)
         SharedStore.appendHistory(total: b.total)
+        checkLowBalance(total: total, sign: sign)
         updateFooter()
+    }
+
+    /// 低余额提醒（低于阈值发一次系统通知，恢复后重置）
+    private func checkLowBalance(total: Double, sign: String) {
+        guard lowBalanceAlert else { return }
+        if total < lowBalanceThreshold {
+            guard !(SharedStore.get("lowNotified") as? Bool ?? false) else { return }
+            let center = UNUserNotificationCenter.current()
+            center.requestAuthorization(options: [.alert, .sound]) { _, _ in }
+            let content = UNMutableNotificationContent()
+            content.title = "DeepSeek 余额不足"
+            content.body = "当前余额 \(sign) \(String(format: "%.2f", total))，低于提醒阈值 \(sign) \(String(format: "%.2f", lowBalanceThreshold))"
+            content.sound = .default
+            let req = UNNotificationRequest(identifier: "ds-low-balance", content: content, trigger: nil)
+            center.add(req)
+            SharedStore.set("lowNotified", true)
+        } else {
+            SharedStore.set("lowNotified", false)
+        }
     }
 
     private func updateFooter() {
@@ -796,13 +846,19 @@ final class FloatingPanel: NSPanel {
                                    interval: interval,
                                    alwaysOnTop: alwaysOnTop,
                                    opacity: SharedStore.get("opacity") as? Double ?? 1.0,
-                                   accent: SharedStore.get("accent") as? Int ?? 0)
+                                   accent: SharedStore.get("accent") as? Int ?? 0,
+                                   appearanceMode: SharedStore.get("appearanceMode") as? Int ?? 0,
+                                   dashCards: SharedStore.get("dashCards") as? [Int] ?? [0, 1, 2, 3, 4, 5],
+                                   dashRange: SharedStore.get("dashRange") as? Int ?? 7,
+                                   lowAlert: SharedStore.get("lowBalanceAlert") as? Bool ?? false,
+                                   lowThreshold: SharedStore.get("lowBalanceThreshold") as? Double ?? 10.0)
         sheet.onSave = { [weak self] in
             guard let self = self else { return }
             self.interval = SharedStore.get("refreshInterval") as? Int ?? 60
             if self.interval <= 0 { self.interval = 60 }
             self.setAlwaysOnTop(SharedStore.get("alwaysOnTop") as? Bool ?? true)
             self.alphaValue = CGFloat(SharedStore.get("opacity") as? Double ?? 1.0)
+            self.applyAppearance()
             // save() 已先写 SharedStore 再回调，新旧值已无法区分，故无条件重建
             self.startTicker()
             self.applyMode()
@@ -883,61 +939,112 @@ final class MiniChartView: NSView {
     }
 }
 
-// MARK: - 设置面板
+// MARK: - 设置面板（多标签：基础 / 外观 / 看板 / 提醒）
 final class SettingsWindow: NSWindow {
     var onSave: (() -> Void)?
-    private let keyField = NSSecureTextField(frame: NSRect(x: 88, y: 326, width: 200, height: 24))
+
+    // 基础
+    private let keyField = NSSecureTextField(frame: .zero)
     private let showKey = NSButton(checkboxWithTitle: "显示", target: nil, action: nil)
-    private let modePopup = NSPopUpButton(frame: NSRect(x: 114, y: 282, width: 170, height: 26), pullsDown: false)
-    private let sourcePopup = NSPopUpButton(frame: NSRect(x: 114, y: 240, width: 170, height: 26), pullsDown: false)
-    private let baseField = NSTextField(frame: NSRect(x: 114, y: 198, width: 240, height: 24))
-    private let intervalPopup = NSPopUpButton(frame: NSRect(x: 124, y: 156, width: 120, height: 26), pullsDown: false)
+    private let modePopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let sourcePopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let baseField = NSTextField(frame: .zero)
+    private let intervalPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let intervals = [15, 30, 60, 120, 300]
+    // 外观
     private let topCheck = NSButton(checkboxWithTitle: "窗口始终置顶", target: nil, action: nil)
+    private let appearancePopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let opacitySlider = NSSlider(value: 1.0, minValue: 0.5, maxValue: 1.0, target: nil, action: nil)
     private let opacityValue = NSTextField(labelWithString: "100%")
     private var accentButtons: [NSButton] = []
     private var currentAccent: Int = 0
-    private let intervals = [15, 30, 60, 120, 300]
+    // 看板
+    private let dashCardChecks = ["当前余额", "今日消耗", "累计消耗", "累计充值", "记录天数", "区间最高"].map {
+        NSButton(checkboxWithTitle: $0, target: nil, action: nil)
+    }
+    private let dashRangePopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    // 提醒
+    private let lowCheck = NSButton(checkboxWithTitle: "余额低于阈值时发送系统通知", target: nil, action: nil)
+    private let thresholdField = NSTextField(frame: .zero)
 
-    init(displayMode: Int, sourceType: Int, baseURL: String, apiKey: String, interval: Int, alwaysOnTop: Bool, opacity: Double, accent: Int) {
-        super.init(contentRect: NSRect(x: 0, y: 0, width: 380, height: 420),
+    init(displayMode: Int, sourceType: Int, baseURL: String, apiKey: String, interval: Int,
+         alwaysOnTop: Bool, opacity: Double, accent: Int, appearanceMode: Int,
+         dashCards: [Int], dashRange: Int, lowAlert: Bool, lowThreshold: Double) {
+        super.init(contentRect: NSRect(x: 0, y: 0, width: 400, height: 476),
                    styleMask: [.titled, .closable], backing: .buffered, defer: false)
         title = "DeepSeek 用量面板 · 设置"
         isReleasedWhenClosed = false
-        appearance = NSAppearance(named: .darkAqua)
         buildUI(displayMode: displayMode, sourceType: sourceType, baseURL: baseURL,
                 apiKey: apiKey, interval: interval, alwaysOnTop: alwaysOnTop,
-                opacity: opacity, accent: accent)
+                opacity: opacity, accent: accent, appearanceMode: appearanceMode,
+                dashCards: dashCards, dashRange: dashRange, lowAlert: lowAlert, lowThreshold: lowThreshold)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    private func label(_ text: String, _ frame: NSRect, _ color: NSColor = .secondaryLabelColor) -> NSTextField {
+        let l = NSTextField(labelWithString: text)
+        l.font = .systemFont(ofSize: 12)
+        l.textColor = color
+        l.frame = frame
+        return l
     }
 
     private func buildUI(displayMode: Int, sourceType: Int, baseURL: String,
                          apiKey: String, interval: Int, alwaysOnTop: Bool,
-                         opacity: Double, accent: Int) {
+                         opacity: Double, accent: Int, appearanceMode: Int,
+                         dashCards: [Int], dashRange: Int, lowAlert: Bool, lowThreshold: Double) {
         let content = contentView!
-        let labelFont = NSFont.systemFont(ofSize: 12)
-        let labelColor = NSColor.secondaryLabelColor
 
-        func label(_ text: String, _ frame: NSRect) -> NSTextField {
-            let l = NSTextField(labelWithString: text)
-            l.font = labelFont
-            l.textColor = labelColor
-            l.frame = frame
-            return l
-        }
+        // ---- 标签页 ----
+        let tabView = NSTabView(frame: NSRect(x: 10, y: 52, width: 380, height: 388))
+        tabView.addTabViewItem(makeTab("基础", buildBasicTab(displayMode: displayMode, sourceType: sourceType,
+                                                             baseURL: baseURL, apiKey: apiKey, interval: interval)))
+        tabView.addTabViewItem(makeTab("外观", buildAppearanceTab(alwaysOnTop: alwaysOnTop, opacity: opacity,
+                                                                  accent: accent, appearanceMode: appearanceMode)))
+        tabView.addTabViewItem(makeTab("看板", buildDashboardTab(dashCards: dashCards, dashRange: dashRange)))
+        tabView.addTabViewItem(makeTab("提醒", buildAlertTab(lowAlert: lowAlert, lowThreshold: lowThreshold)))
+        content.addSubview(tabView)
 
-        // API Key
-        content.addSubview(label("API Key", NSRect(x: 20, y: 330, width: 64, height: 20)))
+        // 按钮
+        let cancelButton = NSButton(title: "取消", target: self, action: #selector(cancel))
+        cancelButton.bezelStyle = .rounded
+        cancelButton.keyEquivalent = "\u{1b}"
+        cancelButton.frame = NSRect(x: 208, y: 12, width: 82, height: 30)
+        content.addSubview(cancelButton)
+
+        let saveButton = NSButton(title: "保存", target: self, action: #selector(save))
+        saveButton.bezelStyle = .rounded
+        saveButton.keyEquivalent = "\r"
+        saveButton.frame = NSRect(x: 300, y: 12, width: 76, height: 30)
+        content.addSubview(saveButton)
+    }
+
+    private func makeTab(_ title: String, _ view: NSView) -> NSTabViewItem {
+        let item = NSTabViewItem(identifier: title)
+        item.label = title
+        item.view = view
+        return item
+    }
+
+    // MARK: 基础
+    private func buildBasicTab(displayMode: Int, sourceType: Int, baseURL: String, apiKey: String, interval: Int) -> NSView {
+        let v = NSView(frame: NSRect(x: 0, y: 0, width: 380, height: 388))
+
+        v.addSubview(label("API Key", NSRect(x: 20, y: 330, width: 64, height: 20)))
         keyField.stringValue = apiKey
         keyField.placeholderString = "sk-…"
         keyField.font = .systemFont(ofSize: 12)
-        content.addSubview(keyField)
+        keyField.frame = NSRect(x: 88, y: 326, width: 200, height: 24)
+        v.addSubview(keyField)
         showKey.target = self
         showKey.action = #selector(toggleKeyVisible)
         showKey.frame = NSRect(x: 296, y: 328, width: 68, height: 20)
-        content.addSubview(showKey)
+        v.addSubview(showKey)
 
-        // 显示模式
-        content.addSubview(label("显示模式", NSRect(x: 20, y: 286, width: 90, height: 20)))
+        v.addSubview(label("显示模式", NSRect(x: 20, y: 286, width: 90, height: 20)))
+        modePopup.frame = NSRect(x: 114, y: 282, width: 170, height: 26)
         modePopup.removeAllItems()
         modePopup.addItem(withTitle: "极简 · 只显示总余额")
         modePopup.lastItem?.tag = 0
@@ -947,10 +1054,10 @@ final class SettingsWindow: NSWindow {
         modePopup.lastItem?.tag = 2
         modePopup.selectItem(withTag: displayMode)
         if modePopup.selectedTag() == -1 { modePopup.selectItem(withTag: 0) }
-        content.addSubview(modePopup)
+        v.addSubview(modePopup)
 
-        // 数据源
-        content.addSubview(label("数据源", NSRect(x: 20, y: 244, width: 90, height: 20)))
+        v.addSubview(label("数据源", NSRect(x: 20, y: 244, width: 90, height: 20)))
+        sourcePopup.frame = NSRect(x: 114, y: 240, width: 170, height: 26)
         sourcePopup.removeAllItems()
         sourcePopup.addItem(withTitle: "DeepSeek 官方 API")
         sourcePopup.lastItem?.tag = 0
@@ -960,48 +1067,34 @@ final class SettingsWindow: NSWindow {
         if sourcePopup.selectedTag() == -1 { sourcePopup.selectItem(withTag: 0) }
         sourcePopup.target = self
         sourcePopup.action = #selector(sourceChanged)
-        content.addSubview(sourcePopup)
+        v.addSubview(sourcePopup)
 
-        // 网关地址
-        content.addSubview(label("网关地址", NSRect(x: 20, y: 202, width: 90, height: 20)))
+        v.addSubview(label("网关地址", NSRect(x: 20, y: 202, width: 90, height: 20)))
         baseField.stringValue = baseURL
         baseField.placeholderString = "https://your-gateway.com（可选 /v1）"
         baseField.font = .systemFont(ofSize: 12)
+        baseField.frame = NSRect(x: 114, y: 198, width: 240, height: 24)
         baseField.isEnabled = (sourcePopup.selectedTag() == 1)
-        content.addSubview(baseField)
+        v.addSubview(baseField)
 
-        // 刷新间隔
-        content.addSubview(label("自动刷新间隔", NSRect(x: 20, y: 160, width: 100, height: 20)))
+        v.addSubview(label("自动刷新间隔", NSRect(x: 20, y: 160, width: 100, height: 20)))
+        intervalPopup.frame = NSRect(x: 124, y: 156, width: 120, height: 26)
+        intervalPopup.removeAllItems()
         for iv in intervals {
             intervalPopup.addItem(withTitle: "\(iv) 秒")
             intervalPopup.lastItem?.tag = iv
         }
         intervalPopup.selectItem(withTag: interval)
         if intervalPopup.selectedTag() == -1 { intervalPopup.selectItem(withTag: 60) }
-        content.addSubview(intervalPopup)
+        v.addSubview(intervalPopup)
+        return v
+    }
 
-        // 窗口置顶
-        content.addSubview(label("窗口置顶", NSRect(x: 20, y: 128, width: 90, height: 20)))
-        topCheck.state = alwaysOnTop ? .on : .off
-        topCheck.frame = NSRect(x: 112, y: 126, width: 160, height: 20)
-        content.addSubview(topCheck)
+    // MARK: 外观
+    private func buildAppearanceTab(alwaysOnTop: Bool, opacity: Double, accent: Int, appearanceMode: Int) -> NSView {
+        let v = NSView(frame: NSRect(x: 0, y: 0, width: 380, height: 388))
 
-        // 面板透明度
-        content.addSubview(label("面板透明度", NSRect(x: 20, y: 88, width: 90, height: 20)))
-        opacitySlider.doubleValue = max(0.5, min(1.0, opacity))
-        opacitySlider.isContinuous = true
-        opacitySlider.target = self
-        opacitySlider.action = #selector(opacityChanged)
-        opacitySlider.frame = NSRect(x: 112, y: 86, width: 150, height: 20)
-        content.addSubview(opacitySlider)
-        opacityValue.font = .systemFont(ofSize: 12)
-        opacityValue.textColor = .secondaryLabelColor
-        opacityValue.frame = NSRect(x: 268, y: 88, width: 52, height: 20)
-        opacityValue.stringValue = "\(Int(round(opacity * 100)))%"
-        content.addSubview(opacityValue)
-
-        // 主题色（Apple 系统色板）
-        content.addSubview(label("主题色", NSRect(x: 20, y: 54, width: 90, height: 20)))
+        v.addSubview(label("主题色", NSRect(x: 20, y: 330, width: 90, height: 20)))
         currentAccent = accent
         for (i, t) in AccentTheme.allCases.enumerated() {
             let x = 112 + CGFloat(i) * 30
@@ -1012,25 +1105,102 @@ final class SettingsWindow: NSWindow {
             b.layer?.backgroundColor = t.color.cgColor
             b.layer?.cornerRadius = 10
             b.layer?.masksToBounds = true
-            b.frame = NSRect(x: x, y: 50, width: 20, height: 20)
+            b.frame = NSRect(x: x, y: 326, width: 20, height: 20)
             b.toolTip = t.name
-            content.addSubview(b)
+            v.addSubview(b)
             accentButtons.append(b)
         }
         updateAccentSelection()
 
-        // 按钮
-        let cancelButton = NSButton(title: "取消", target: self, action: #selector(cancel))
-        cancelButton.bezelStyle = .rounded
-        cancelButton.keyEquivalent = "\u{1b}"
-        cancelButton.frame = NSRect(x: 196, y: 12, width: 82, height: 30)
-        content.addSubview(cancelButton)
+        v.addSubview(label("面板透明度", NSRect(x: 20, y: 288, width: 90, height: 20)))
+        opacitySlider.doubleValue = max(0.5, min(1.0, opacity))
+        opacitySlider.isContinuous = true
+        opacitySlider.target = self
+        opacitySlider.action = #selector(opacityChanged)
+        opacitySlider.frame = NSRect(x: 112, y: 286, width: 150, height: 20)
+        v.addSubview(opacitySlider)
+        opacityValue.font = .systemFont(ofSize: 12)
+        opacityValue.textColor = .secondaryLabelColor
+        opacityValue.frame = NSRect(x: 268, y: 288, width: 52, height: 20)
+        opacityValue.stringValue = "\(Int(round(opacity * 100)))%"
+        v.addSubview(opacityValue)
 
-        let saveButton = NSButton(title: "保存", target: self, action: #selector(save))
-        saveButton.bezelStyle = .rounded
-        saveButton.keyEquivalent = "\r"
-        saveButton.frame = NSRect(x: 284, y: 12, width: 76, height: 30)
-        content.addSubview(saveButton)
+        v.addSubview(label("外观", NSRect(x: 20, y: 246, width: 90, height: 20)))
+        appearancePopup.frame = NSRect(x: 114, y: 242, width: 150, height: 26)
+        appearancePopup.removeAllItems()
+        appearancePopup.addItem(withTitle: "跟随系统")
+        appearancePopup.lastItem?.tag = 0
+        appearancePopup.addItem(withTitle: "深色")
+        appearancePopup.lastItem?.tag = 1
+        appearancePopup.addItem(withTitle: "浅色")
+        appearancePopup.lastItem?.tag = 2
+        appearancePopup.selectItem(withTag: appearanceMode)
+        if appearancePopup.selectedTag() == -1 { appearancePopup.selectItem(withTag: 0) }
+        v.addSubview(appearancePopup)
+
+        v.addSubview(label("窗口置顶", NSRect(x: 20, y: 200, width: 90, height: 20)))
+        topCheck.state = alwaysOnTop ? .on : .off
+        topCheck.frame = NSRect(x: 112, y: 198, width: 160, height: 20)
+        v.addSubview(topCheck)
+        return v
+    }
+
+    // MARK: 看板
+    private func buildDashboardTab(dashCards: [Int], dashRange: Int) -> NSView {
+        let v = NSView(frame: NSRect(x: 0, y: 0, width: 380, height: 388))
+        v.addSubview(label("悬浮窗看板显示卡片", NSRect(x: 20, y: 330, width: 150, height: 20)))
+        let labels = ["当前余额", "今日消耗", "累计消耗", "累计充值", "记录天数", "区间最高"]
+        for (i, cb) in dashCardChecks.enumerated() {
+            cb.state = dashCards.contains(i) ? .on : .off
+            cb.frame = NSRect(x: 112 + CGFloat(i / 3) * 120, y: 300 - CGFloat(i % 3) * 34, width: 110, height: 22)
+            v.addSubview(cb)
+        }
+        v.addSubview(label("默认时间范围", NSRect(x: 20, y: 190, width: 100, height: 20)))
+        dashRangePopup.frame = NSRect(x: 124, y: 186, width: 120, height: 26)
+        dashRangePopup.removeAllItems()
+        dashRangePopup.addItem(withTitle: "近 7 天")
+        dashRangePopup.lastItem?.tag = 7
+        dashRangePopup.addItem(withTitle: "近 30 天")
+        dashRangePopup.lastItem?.tag = 30
+        dashRangePopup.addItem(withTitle: "全部")
+        dashRangePopup.lastItem?.tag = 0
+        dashRangePopup.selectItem(withTag: dashRange)
+        if dashRangePopup.selectedTag() == -1 { dashRangePopup.selectItem(withTag: 7) }
+        v.addSubview(dashRangePopup)
+        return v
+    }
+
+    // MARK: 提醒
+    private func buildAlertTab(lowAlert: Bool, lowThreshold: Double) -> NSView {
+        let v = NSView(frame: NSRect(x: 0, y: 0, width: 380, height: 388))
+        lowCheck.state = lowAlert ? .on : .off
+        lowCheck.frame = NSRect(x: 20, y: 320, width: 260, height: 22)
+        v.addSubview(lowCheck)
+
+        v.addSubview(label("提醒阈值（元）", NSRect(x: 20, y: 282, width: 100, height: 20)))
+        thresholdField.stringValue = String(format: "%.0f", lowThreshold)
+        thresholdField.font = .systemFont(ofSize: 12)
+        thresholdField.frame = NSRect(x: 124, y: 278, width: 80, height: 24)
+        v.addSubview(thresholdField)
+
+        let clearButton = NSButton(title: "清除历史数据…", target: self, action: #selector(clearHistory))
+        clearButton.bezelStyle = .rounded
+        clearButton.frame = NSRect(x: 20, y: 220, width: 140, height: 30)
+        v.addSubview(clearButton)
+        return v
+    }
+
+    // MARK: - 动作
+    @objc private func toggleKeyVisible() {
+        (keyField.cell as? NSSecureTextFieldCell)?.echosBullets = !(showKey.state == .on)
+    }
+
+    @objc private func sourceChanged() {
+        baseField.isEnabled = (sourcePopup.selectedTag() == 1)
+    }
+
+    @objc private func opacityChanged() {
+        opacityValue.stringValue = "\(Int(round(opacitySlider.doubleValue * 100)))%"
     }
 
     @objc private func accentPicked(_ sender: NSButton) {
@@ -1045,21 +1215,21 @@ final class SettingsWindow: NSWindow {
         }
     }
 
-    @objc private func toggleKeyVisible() {
-        (keyField.cell as? NSSecureTextFieldCell)?.echosBullets = !(showKey.state == .on)
-    }
-
-    @objc private func sourceChanged() {
-        baseField.isEnabled = (sourcePopup.selectedTag() == 1)
-    }
-
-    @objc private func opacityChanged() {
-        opacityValue.stringValue = "\(Int(round(opacitySlider.doubleValue * 100)))%"
+    @objc private func clearHistory() {
+        let alert = NSAlert()
+        alert.messageText = "清除历史数据？"
+        alert.informativeText = "将删除本地记录的余额历史（看板曲线与累计统计会重新从当前余额开始记录）。"
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "清除")
+        alert.addButton(withTitle: "取消")
+        if alert.runModal() == .alertFirstButtonReturn {
+            SharedStore.clearHistory()
+        }
     }
 
     @objc private func save() {
         let key = keyField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        _ = KeychainStore.set(key, for: "apiKey")   // 兜底写钥匙串
+        _ = KeychainStore.set(key, for: "apiKey")
         SharedStore.set("apiKey", key)
         let mode = modePopup.selectedTag()
         let source = sourcePopup.selectedTag()
@@ -1073,6 +1243,15 @@ final class SettingsWindow: NSWindow {
         SharedStore.set("alwaysOnTop", topCheck.state == .on)
         SharedStore.set("opacity", opacitySlider.doubleValue)
         SharedStore.set("accent", currentAccent)
+        SharedStore.set("appearanceMode", appearancePopup.selectedTag() >= 0 ? appearancePopup.selectedTag() : 0)
+        var cards: [Int] = []
+        for (i, cb) in dashCardChecks.enumerated() where cb.state == .on { cards.append(i) }
+        if cards.isEmpty { cards = [0] }
+        SharedStore.set("dashCards", cards)
+        SharedStore.set("dashRange", dashRangePopup.selectedTag() >= 0 ? dashRangePopup.selectedTag() : 7)
+        SharedStore.set("lowBalanceAlert", lowCheck.state == .on)
+        let thr = Double(thresholdField.stringValue) ?? 10.0
+        SharedStore.set("lowBalanceThreshold", max(0.5, thr))
         close()
         onSave?()
     }

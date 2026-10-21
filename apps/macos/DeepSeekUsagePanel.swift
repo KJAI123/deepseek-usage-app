@@ -1042,7 +1042,7 @@ final class SettingsWindow: NSWindow {
     init(displayMode: Int, sourceType: Int, baseURL: String, apiKey: String, interval: Int,
          alwaysOnTop: Bool, opacity: Double, accent: Int, appearanceMode: Int,
          dashCards: [Int], dashRange: Int, showChart: Bool, lowAlert: Bool, lowThreshold: Double) {
-        super.init(contentRect: NSRect(x: 0, y: 0, width: 400, height: 432),
+        super.init(contentRect: NSRect(x: 0, y: 0, width: 400, height: 454),
                    styleMask: [.titled, .closable], backing: .buffered, defer: false)
         title = "DeepSeek 用量面板 · 设置"
         isReleasedWhenClosed = false
@@ -1072,7 +1072,7 @@ final class SettingsWindow: NSWindow {
         let content = contentView!
 
         // ---- 标签页 ----
-        let tabView = NSTabView(frame: NSRect(x: 10, y: 42, width: 380, height: 348))
+        let tabView = NSTabView(frame: NSRect(x: 10, y: 42, width: 380, height: 372))
         tabView.addTabViewItem(makeTab("基础", buildBasicTab(displayMode: displayMode, sourceType: sourceType,
                                                              baseURL: baseURL, apiKey: apiKey, interval: interval)))
         tabView.addTabViewItem(makeTab("外观", buildAppearanceTab(alwaysOnTop: alwaysOnTop, opacity: opacity,
@@ -1104,7 +1104,7 @@ final class SettingsWindow: NSWindow {
 
     // MARK: 基础
     private func buildBasicTab(displayMode: Int, sourceType: Int, baseURL: String, apiKey: String, interval: Int) -> NSView {
-        let v = NSView(frame: NSRect(x: 0, y: 0, width: 380, height: 348))
+        let v = NSView(frame: NSRect(x: 0, y: 0, width: 380, height: 372))
 
         v.addSubview(label("API Key", NSRect(x: 20, y: 308, width: 64, height: 20)))
         keyField.stringValue = apiKey
@@ -1166,7 +1166,7 @@ final class SettingsWindow: NSWindow {
 
     // MARK: 外观
     private func buildAppearanceTab(alwaysOnTop: Bool, opacity: Double, accent: Int, appearanceMode: Int) -> NSView {
-        let v = NSView(frame: NSRect(x: 0, y: 0, width: 380, height: 348))
+        let v = NSView(frame: NSRect(x: 0, y: 0, width: 380, height: 372))
 
         v.addSubview(label("主题色", NSRect(x: 20, y: 308, width: 90, height: 20)))
         currentAccent = accent
@@ -1221,7 +1221,7 @@ final class SettingsWindow: NSWindow {
 
     // MARK: 看板
     private func buildDashboardTab(dashCards: [Int], dashRange: Int, showChart: Bool) -> NSView {
-        let v = NSView(frame: NSRect(x: 0, y: 0, width: 380, height: 348))
+        let v = NSView(frame: NSRect(x: 0, y: 0, width: 380, height: 372))
         v.addSubview(label("悬浮窗看板显示卡片", NSRect(x: 20, y: 308, width: 150, height: 20)))
         for (i, cb) in dashCardChecks.enumerated() {
             cb.state = dashCards.contains(i) ? .on : .off
@@ -1249,7 +1249,7 @@ final class SettingsWindow: NSWindow {
 
     // MARK: 提醒
     private func buildAlertTab(lowAlert: Bool, lowThreshold: Double) -> NSView {
-        let v = NSView(frame: NSRect(x: 0, y: 0, width: 380, height: 348))
+        let v = NSView(frame: NSRect(x: 0, y: 0, width: 380, height: 372))
         lowCheck.state = lowAlert ? .on : .off
         lowCheck.frame = NSRect(x: 20, y: 300, width: 260, height: 22)
         v.addSubview(lowCheck)

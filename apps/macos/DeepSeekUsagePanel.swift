@@ -572,7 +572,11 @@ final class FloatingPanel: NSPanel {
         }
         dashboardValues["今日消耗"]?.stringValue = todayUsage > 0.001 ? "\(sign) \(String(format: "%.2f", todayUsage))" : "0.00"
         dashboardValues["累计消耗"]?.stringValue = cumUsage > 0.001 ? "\(sign) \(String(format: "%.2f", cumUsage))" : "0.00"
-        dashboardValues["累计充值"]?.stringValue = topup > 0.001 ? "\(sign) \(String(format: "%.2f", topup))" : "0.00"
+        // 累计充值：优先取官方充值余额（topped_up_balance，用户实际充值的钱），
+        // 记录期内检测到的充值事件作为补充（API 快照已含记录期充值，故取较大值）
+        let topped = Double(balance?["topped"] as? String ?? "0") ?? 0
+        let cumTopup = max(topup, topped)
+        dashboardValues["累计充值"]?.stringValue = cumTopup > 0.001 ? "\(sign) \(String(format: "%.2f", cumTopup))" : "0.00"
 
         let firstTs = entries.first?["ts"] as? Double ?? 0
         let days = firstTs > 0 ? max(1, Int((Date().timeIntervalSince1970 - firstTs) / 86400)) : 0
@@ -1338,9 +1342,10 @@ final class DashboardWindow: NSWindow, WKNavigationDelegate, WKScriptMessageHand
         let entries = SharedStore.historyJSON() ?? "[]"
         let balance = SharedStore.readBalance()
         let total = balance?["total"] as? String ?? ""
+        let topped = balance?["topped"] as? String ?? "0"
         let sign = balance?["sign"] as? String ?? "¥"
         let accent = AccentTheme(rawValue: SharedStore.get("accent") as? Int ?? 0)?.hex ?? "#0A84FF"
-        let js = "window.__DS_DATA__ = { sign: \(Self.jsStr(sign)), current: \(Self.jsStr(total)), entries: \(entries), accent: \(Self.jsStr(accent)) }; console.log('injected', JSON.stringify(window.__DS_DATA__).slice(0, 300)); renderDashboard();"
+        let js = "window.__DS_DATA__ = { sign: \(Self.jsStr(sign)), current: \(Self.jsStr(total)), topped: \(Self.jsStr(topped)), entries: \(entries), accent: \(Self.jsStr(accent)) }; console.log('injected', JSON.stringify(window.__DS_DATA__).slice(0, 300)); renderDashboard();"
         webView.evaluateJavaScript(js, completionHandler: nil)
     }
 

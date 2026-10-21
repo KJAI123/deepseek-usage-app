@@ -1038,6 +1038,10 @@ final class SettingsWindow: NSWindow {
     // 提醒
     private let lowCheck = NSButton(checkboxWithTitle: "余额低于阈值时发送系统通知", target: nil, action: nil)
     private let thresholdField = NSTextField(frame: .zero)
+    // 标签栏
+    private var tabSeg: NSSegmentedControl!
+    private let tabContent = NSView()
+    private var tabs: [NSView] = []
 
     init(displayMode: Int, sourceType: Int, baseURL: String, apiKey: String, interval: Int,
          alwaysOnTop: Bool, opacity: Double, accent: Int, appearanceMode: Int,
@@ -1071,15 +1075,28 @@ final class SettingsWindow: NSWindow {
                          lowAlert: Bool, lowThreshold: Double) {
         let content = contentView!
 
-        // ---- 标签页 ----
-        let tabView = NSTabView(frame: NSRect(x: 10, y: 42, width: 380, height: 372))
-        tabView.addTabViewItem(makeTab("基础", buildBasicTab(displayMode: displayMode, sourceType: sourceType,
-                                                             baseURL: baseURL, apiKey: apiKey, interval: interval)))
-        tabView.addTabViewItem(makeTab("外观", buildAppearanceTab(alwaysOnTop: alwaysOnTop, opacity: opacity,
-                                                                  accent: accent, appearanceMode: appearanceMode)))
-        tabView.addTabViewItem(makeTab("看板", buildDashboardTab(dashCards: dashCards, dashRange: dashRange, showChart: showChart)))
-        tabView.addTabViewItem(makeTab("提醒", buildAlertTab(lowAlert: lowAlert, lowThreshold: lowThreshold)))
-        content.addSubview(tabView)
+        // ---- 标签栏（分段控件，高 30，点击区域大）----
+        tabSeg = NSSegmentedControl(labels: ["基础", "外观", "看板", "提醒"],
+                                    trackingMode: .selectOne, target: self, action: #selector(tabChanged))
+        tabSeg.selectedSegment = 0
+        tabSeg.segmentStyle = .rounded
+        tabSeg.frame = NSRect(x: 10, y: 398, width: 380, height: 30)
+        content.addSubview(tabSeg)
+
+        // 内容容器
+        tabContent.frame = NSRect(x: 10, y: 40, width: 380, height: 352)
+        content.addSubview(tabContent)
+
+        // 预构建 4 个标签页
+        tabs = [
+            buildBasicTab(displayMode: displayMode, sourceType: sourceType,
+                          baseURL: baseURL, apiKey: apiKey, interval: interval),
+            buildAppearanceTab(alwaysOnTop: alwaysOnTop, opacity: opacity,
+                               accent: accent, appearanceMode: appearanceMode),
+            buildDashboardTab(dashCards: dashCards, dashRange: dashRange, showChart: showChart),
+            buildAlertTab(lowAlert: lowAlert, lowThreshold: lowThreshold)
+        ]
+        switchTab(0)
 
         // 按钮
         let cancelButton = NSButton(title: "取消", target: self, action: #selector(cancel))
@@ -1095,11 +1112,15 @@ final class SettingsWindow: NSWindow {
         content.addSubview(saveButton)
     }
 
-    private func makeTab(_ title: String, _ view: NSView) -> NSTabViewItem {
-        let item = NSTabViewItem(identifier: title)
-        item.label = title
-        item.view = view
-        return item
+    @objc private func tabChanged() {
+        switchTab(tabSeg.selectedSegment)
+    }
+
+    private func switchTab(_ idx: Int) {
+        tabContent.subviews.forEach { $0.removeFromSuperview() }
+        let v = tabs[idx]
+        v.frame = tabContent.bounds
+        tabContent.addSubview(v)
     }
 
     // MARK: 基础

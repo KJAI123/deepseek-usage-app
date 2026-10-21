@@ -383,8 +383,14 @@ final class FloatingPanel: NSPanel {
 
     init() {
         let mode = SharedStore.get("displayMode") as? Int ?? 0
+        let hasChart = SharedStore.get("showChart") as? Bool ?? true
+        let h: CGFloat
+        switch mode {
+        case 0: h = 100
+        case 1: h = 244
+        default: h = hasChart ? 280 : 210
+        }
         let w: CGFloat = mode == 2 ? 340 : (mode == 0 ? 320 : 340)
-        let h: CGFloat = mode == 2 ? 280 : (mode == 0 ? 100 : 244)
         super.init(contentRect: NSRect(x: 0, y: 0, width: w, height: h),
                    styleMask: [.nonactivatingPanel, .borderless, .fullSizeContentView],
                    backing: .buffered, defer: false)
@@ -419,7 +425,7 @@ final class FloatingPanel: NSPanel {
         chartView = nil
         rangeControl = nil
         let w: CGFloat = isDashboard ? 340 : (isMini ? 320 : 340)
-        let h: CGFloat = isDashboard ? 280 : (isMini ? 100 : 244)
+        let h: CGFloat = isDashboard ? (showChart ? 280 : 210) : (isMini ? 100 : 244)
         setContentSize(NSSize(width: w, height: h))
         alphaValue = CGFloat(opacity)
         buildUI()
@@ -456,6 +462,9 @@ final class FloatingPanel: NSPanel {
         get { SharedStore.get("dashRange") as? Int ?? 7 }
         set { SharedStore.set("dashRange", newValue) }
     }
+    private var showChart: Bool {                      // 看板是否显示迷你曲线
+        get { SharedStore.get("showChart") as? Bool ?? true }
+    }
 
     private func buildDashboardLayout(_ content: NSView) {
         // 毛玻璃背景：整窗可拖（与极简/标准一致，小组件交互）
@@ -469,11 +478,19 @@ final class FloatingPanel: NSPanel {
         effect.layer?.masksToBounds = true
         content.addSubview(effect)
 
-        // 标题 + 时间范围（分段控件）
+        // 标题 + 时间范围（分段控件）——坐标随是否显示曲线调整
+        let hasChart = showChart
+        let titleY: CGFloat = hasChart ? 260 : 160
+        let segY: CGFloat = hasChart ? 256 : 156
+        let row1LabelY: CGFloat = hasChart ? 222 : 116
+        let row1ValY: CGFloat = hasChart ? 202 : 98
+        let row2LabelY: CGFloat = hasChart ? 168 : 62
+        let row2ValY: CGFloat = hasChart ? 148 : 44
+
         let title = DragLabel(labelWithString: "DeepSeek 用量")
         title.font = .systemFont(ofSize: 11)
         title.textColor = .secondaryLabelColor
-        title.frame = NSRect(x: 12, y: 260, width: 110, height: 14)
+        title.frame = NSRect(x: 12, y: titleY, width: 110, height: 14)
         content.addSubview(title)
 
         let seg = NSSegmentedControl(labels: ["7天", "30天", "全部"], trackingMode: .selectOne,
@@ -481,7 +498,7 @@ final class FloatingPanel: NSPanel {
         seg.selectedSegment = dashRange == 30 ? 1 : (dashRange == 0 ? 2 : 0)
         seg.segmentStyle = .rounded
         if #available(macOS 11.0, *) { seg.selectedSegmentBezelColor = accentColor }
-        seg.frame = NSRect(x: 196, y: 256, width: 132, height: 22)
+        seg.frame = NSRect(x: 196, y: segY, width: 132, height: 22)
         content.addSubview(seg)
         rangeControl = seg
 
@@ -496,8 +513,8 @@ final class FloatingPanel: NSPanel {
         for (i, spec) in specs.enumerated() {
             let col = i % cols, row = i / cols
             let x = 12 + CGFloat(col) * (cardW + 8)
-            let labelY: CGFloat = row == 0 ? 222 : 168
-            let valY: CGFloat = row == 0 ? 202 : 148
+            let labelY: CGFloat = row == 0 ? row1LabelY : row2LabelY
+            let valY: CGFloat = row == 0 ? row1ValY : row2ValY
             let label = DragLabel(labelWithString: spec.1)
             label.font = .systemFont(ofSize: 10)
             label.textColor = .secondaryLabelColor
@@ -511,12 +528,14 @@ final class FloatingPanel: NSPanel {
             dashboardValues[spec.1] = val
         }
 
-        // 迷你余额曲线
-        let chart = MiniChartView(frame: NSRect(x: 12, y: 8, width: content.bounds.width - 24, height: 128))
-        chart.autoresizingMask = [.width]
-        chart.lineColor = accentColor
-        content.addSubview(chart)
-        chartView = chart
+        // 迷你余额曲线（可隐藏）
+        if hasChart {
+            let chart = MiniChartView(frame: NSRect(x: 12, y: 8, width: content.bounds.width - 24, height: 128))
+            chart.autoresizingMask = [.width]
+            chart.lineColor = accentColor
+            content.addSubview(chart)
+            chartView = chart
+        }
     }
 
     @objc private func dashRangeChanged() {
@@ -850,6 +869,7 @@ final class FloatingPanel: NSPanel {
                                    appearanceMode: SharedStore.get("appearanceMode") as? Int ?? 0,
                                    dashCards: SharedStore.get("dashCards") as? [Int] ?? [0, 1, 2, 3, 4, 5],
                                    dashRange: SharedStore.get("dashRange") as? Int ?? 7,
+                                   showChart: SharedStore.get("showChart") as? Bool ?? true,
                                    lowAlert: SharedStore.get("lowBalanceAlert") as? Bool ?? false,
                                    lowThreshold: SharedStore.get("lowBalanceThreshold") as? Double ?? 10.0)
         sheet.onSave = { [weak self] in
@@ -963,13 +983,14 @@ final class SettingsWindow: NSWindow {
         NSButton(checkboxWithTitle: $0, target: nil, action: nil)
     }
     private let dashRangePopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let chartCheck = NSButton(checkboxWithTitle: "显示曲线图", target: nil, action: nil)
     // 提醒
     private let lowCheck = NSButton(checkboxWithTitle: "余额低于阈值时发送系统通知", target: nil, action: nil)
     private let thresholdField = NSTextField(frame: .zero)
 
     init(displayMode: Int, sourceType: Int, baseURL: String, apiKey: String, interval: Int,
          alwaysOnTop: Bool, opacity: Double, accent: Int, appearanceMode: Int,
-         dashCards: [Int], dashRange: Int, lowAlert: Bool, lowThreshold: Double) {
+         dashCards: [Int], dashRange: Int, showChart: Bool, lowAlert: Bool, lowThreshold: Double) {
         super.init(contentRect: NSRect(x: 0, y: 0, width: 400, height: 476),
                    styleMask: [.titled, .closable], backing: .buffered, defer: false)
         title = "DeepSeek 用量面板 · 设置"
@@ -977,7 +998,8 @@ final class SettingsWindow: NSWindow {
         buildUI(displayMode: displayMode, sourceType: sourceType, baseURL: baseURL,
                 apiKey: apiKey, interval: interval, alwaysOnTop: alwaysOnTop,
                 opacity: opacity, accent: accent, appearanceMode: appearanceMode,
-                dashCards: dashCards, dashRange: dashRange, lowAlert: lowAlert, lowThreshold: lowThreshold)
+                dashCards: dashCards, dashRange: dashRange, showChart: showChart,
+                lowAlert: lowAlert, lowThreshold: lowThreshold)
     }
 
     @available(*, unavailable)
@@ -994,7 +1016,8 @@ final class SettingsWindow: NSWindow {
     private func buildUI(displayMode: Int, sourceType: Int, baseURL: String,
                          apiKey: String, interval: Int, alwaysOnTop: Bool,
                          opacity: Double, accent: Int, appearanceMode: Int,
-                         dashCards: [Int], dashRange: Int, lowAlert: Bool, lowThreshold: Double) {
+                         dashCards: [Int], dashRange: Int, showChart: Bool,
+                         lowAlert: Bool, lowThreshold: Double) {
         let content = contentView!
 
         // ---- 标签页 ----
@@ -1003,7 +1026,7 @@ final class SettingsWindow: NSWindow {
                                                              baseURL: baseURL, apiKey: apiKey, interval: interval)))
         tabView.addTabViewItem(makeTab("外观", buildAppearanceTab(alwaysOnTop: alwaysOnTop, opacity: opacity,
                                                                   accent: accent, appearanceMode: appearanceMode)))
-        tabView.addTabViewItem(makeTab("看板", buildDashboardTab(dashCards: dashCards, dashRange: dashRange)))
+        tabView.addTabViewItem(makeTab("看板", buildDashboardTab(dashCards: dashCards, dashRange: dashRange, showChart: showChart)))
         tabView.addTabViewItem(makeTab("提醒", buildAlertTab(lowAlert: lowAlert, lowThreshold: lowThreshold)))
         content.addSubview(tabView)
 
@@ -1146,7 +1169,7 @@ final class SettingsWindow: NSWindow {
     }
 
     // MARK: 看板
-    private func buildDashboardTab(dashCards: [Int], dashRange: Int) -> NSView {
+    private func buildDashboardTab(dashCards: [Int], dashRange: Int, showChart: Bool) -> NSView {
         let v = NSView(frame: NSRect(x: 0, y: 0, width: 380, height: 388))
         v.addSubview(label("悬浮窗看板显示卡片", NSRect(x: 20, y: 330, width: 150, height: 20)))
         let labels = ["当前余额", "今日消耗", "累计消耗", "累计充值", "记录天数", "区间最高"]
@@ -1167,6 +1190,10 @@ final class SettingsWindow: NSWindow {
         dashRangePopup.selectItem(withTag: dashRange)
         if dashRangePopup.selectedTag() == -1 { dashRangePopup.selectItem(withTag: 7) }
         v.addSubview(dashRangePopup)
+
+        chartCheck.state = showChart ? .on : .off
+        chartCheck.frame = NSRect(x: 20, y: 148, width: 140, height: 22)
+        v.addSubview(chartCheck)
         return v
     }
 
@@ -1249,6 +1276,7 @@ final class SettingsWindow: NSWindow {
         if cards.isEmpty { cards = [0] }
         SharedStore.set("dashCards", cards)
         SharedStore.set("dashRange", dashRangePopup.selectedTag() >= 0 ? dashRangePopup.selectedTag() : 7)
+        SharedStore.set("showChart", chartCheck.state == .on)
         SharedStore.set("lowBalanceAlert", lowCheck.state == .on)
         let thr = Double(thresholdField.stringValue) ?? 10.0
         SharedStore.set("lowBalanceThreshold", max(0.5, thr))

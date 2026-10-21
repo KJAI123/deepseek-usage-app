@@ -213,8 +213,9 @@ function renderCards(D) {
   // 累计充值：官方充值余额优先（用户实际充值的钱），记录期内充值事件作为补充
   const topped = parseFloat(D.topped || "0") || 0;
   const cumTopup = Math.max(topup, topped);
-  const dayCount = entries.length
-    ? Math.max(1, Math.round((now.getTime() / 1000 - entries[0].ts) / 86400)) : 0;
+  // 记录天数：实际有记录的自然日数（含首尾）
+  const daySet = new Set(entries.map(e => Math.floor((parseFloat(e.ts) || 0) / 86400)));
+  const dayCount = daySet.size;
   const maxV = entries.reduce((m, e) => Math.max(m, parseFloat(e.total) || 0), 0);
 
   const data = {

@@ -109,7 +109,9 @@ enum SharedStore {
 
     // MARK: - 余额历史（看板数据源）
 
-    /// 追加一条余额记录到共享历史（同一次刷新 5 秒内去重，保留近 90 天 / 最多 1000 条）
+    /// 追加一条余额记录到共享历史（同一次刷新 5 秒内去重，保留近 90 天）
+    /// 存储策略：近 48 小时保留全部细粒度采样；更早的数据按自然日折叠为首尾两条，
+    /// 从而"记录天数"能真实覆盖数天/数十天，且文件不会无限膨胀。
     static func appendHistory(total: String) {
         var entries = historyEntries()
         let ts = Date().timeIntervalSince1970
@@ -119,7 +121,8 @@ enum SharedStore {
         entries.append(["ts": ts, "total": total])
         let cutoff = Date().addingTimeInterval(-86400 * 90).timeIntervalSince1970
         entries = entries.filter { ($0["ts"] as? Double ?? 0) > cutoff }
-        if entries.count > 1000 { entries = Array(entries.suffix(1000)) }
+        entries = compactHistory(entries)
+        if entries.count > 30000 { entries = Array(entries.suffix(30000)) }
         let url = dirURL().appendingPathComponent("history.json")
         do {
             try FileManager.default.createDirectory(at: dirURL(), withIntermediateDirectories: true)
@@ -128,6 +131,30 @@ enum SharedStore {
         } catch {
             NSLog("SharedStore appendHistory failed: \(error.localizedDescription)")
         }
+    }
+
+    /// 近 48 小时保留全部细粒度；更早按自然日折叠（保留该日首条+末条），时间升序
+    static func compactHistory(_ entries: [[String: Any]]) -> [[String: Any]] {
+        let now = Date().timeIntervalSince1970
+        let fineCut = now - 86400 * 2
+        var fine: [[String: Any]] = []
+        var dayBuckets: [Int: [[String: Any]]] = [:]
+        for e in entries {
+            let t = e["ts"] as? Double ?? 0
+            if t >= fineCut {
+                fine.append(e)
+            } else {
+                let day = Int(floor(t / 86400))
+                dayBuckets[day, default: []].append(e)
+            }
+        }
+        var coarse: [[String: Any]] = []
+        for day in dayBuckets.keys.sorted() {
+            guard let arr = dayBuckets[day], let f = arr.first, let l = arr.last else { continue }
+            if arr.count <= 2 { coarse.append(contentsOf: arr) }
+            else { coarse.append(f); coarse.append(l) }
+        }
+        return coarse + fine
     }
 
     static func historyEntries() -> [[String: Any]] {
@@ -619,8 +646,12 @@ final class FloatingPanel: NSPanel {
         let cumTopup = max(topup, topped)
         dashboardValues["累计充值"]?.stringValue = cumTopup > 0.001 ? "\(sign) \(String(format: "%.2f", cumTopup))" : "0.00"
 
-        let firstTs = entries.first?["ts"] as? Double ?? 0
-        let days = firstTs > 0 ? max(1, Int((Date().timeIntervalSince1970 - firstTs) / 86400)) : 0
+        // 记录天数：实际有记录的自然日数（与看板一致）
+        let daySet = Set(entries.compactMap { e -> Int? in
+            guard let t = e["ts"] as? Double, t > 0 else { return nil }
+            return Int(floor(t / 86400))
+        })
+        let days = daySet.count
         dashboardValues["记录天数"]?.stringValue = days > 0 ? "\(days) 天" : "—"
         let maxV = entries.reduce(0.0) { max($0, Double($1["total"] as? String ?? "0") ?? 0) }
         dashboardValues["区间最高"]?.stringValue = maxV > 0 ? "\(sign) \(String(format: "%.2f", maxV))" : "—"

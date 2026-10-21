@@ -44,6 +44,7 @@
   .card .value.bal { color: var(--accent, #ffffff); }
   .card .value.use { color: #ff9f4a; }
   .card .value.up { color: #5fd97f; }
+  .card .value.warn { color: #ff6b6b; }
   #chart { flex: 1; min-height: 250px; }
 
   /* 小尺寸（悬浮窗看板模式 ~420×340）适配 */
@@ -86,38 +87,60 @@
 <body>
 <div class="topbar">
   <div class="range">
-    <button class="btn active" data-range="7">近 7 天</button>
-    <button class="btn" data-range="30">近 30 天</button>
-    <button class="btn" data-range="0">全部</button>
+    <button class="btn active" data-range="7" data-i18n="近 7 天">近 7 天</button>
+    <button class="btn" data-range="30" data-i18n="近 30 天">近 30 天</button>
+    <button class="btn" data-range="0" data-i18n="全部">全部</button>
   </div>
-  <button class="btn" id="cfgBtn">⚙ 自定义显示</button>
+  <button class="btn" id="cfgBtn" data-i18n="自定义显示">⚙ 自定义显示</button>
 </div>
 <div class="stats" id="stats"></div>
 <div id="chart"></div>
 
 <div class="mask" id="mask" hidden></div>
 <div class="cfg-panel" id="cfgPanel" hidden>
-  <div class="cfg-title">自定义显示</div>
-  <div class="cfg-sec">数据卡片（勾选显示）</div>
-  <label><input type="checkbox" data-card="cur"> 当前余额</label>
-  <label><input type="checkbox" data-card="today"> 今日消耗（使用量）</label>
-  <label><input type="checkbox" data-card="cum"> 累计消耗（使用量）</label>
-  <label><input type="checkbox" data-card="topup"> 累计充值</label>
-  <label><input type="checkbox" data-card="days"> 记录天数</label>
-  <label><input type="checkbox" data-card="max"> 区间最高余额</label>
-  <div class="cfg-sec">图表模式</div>
-  <label><input type="radio" name="mode" value="balance"> 余额趋势</label>
-  <label><input type="radio" name="mode" value="usage"> 每日使用量</label>
-  <label><input type="radio" name="mode" value="compare"> 余额 + 使用量对比</label>
+  <div class="cfg-title" data-i18n="自定义显示">自定义显示</div>
+  <div class="cfg-sec" data-i18n="数据卡片（勾选显示）">数据卡片（勾选显示）</div>
+  <label><input type="checkbox" data-card="cur"> <span data-i18n="当前余额">当前余额</span></label>
+  <label><input type="checkbox" data-card="today"> <span data-i18n="今日消耗">今日消耗</span></label>
+  <label><input type="checkbox" data-card="cum"> <span data-i18n="累计消耗">累计消耗</span></label>
+  <label><input type="checkbox" data-card="topup"> <span data-i18n="累计充值">累计充值</span></label>
+  <label><input type="checkbox" data-card="days"> <span data-i18n="记录天数">记录天数</span></label>
+  <label><input type="checkbox" data-card="max"> <span data-i18n="区间最高余额">区间最高余额</span></label>
+  <label><input type="checkbox" data-card="left"> <span data-i18n="预估可用">预估可用</span></label>
+  <div class="cfg-sec" data-i18n="图表模式">图表模式</div>
+  <label><input type="radio" name="mode" value="balance"> <span data-i18n="余额趋势">余额趋势</span></label>
+  <label><input type="radio" name="mode" value="usage"> <span data-i18n="每日使用量">每日使用量</span></label>
+  <label><input type="radio" name="mode" value="compare"> <span data-i18n="余额 + 使用量对比">余额 + 使用量对比</span></label>
   <div class="cfg-actions">
-    <button class="btn primary" id="cfgSave">保存</button>
-    <button class="btn" id="cfgCancel">取消</button>
+    <button class="btn primary" id="cfgSave" data-i18n="保存">保存</button>
+    <button class="btn" id="cfgCancel" data-i18n="取消">取消</button>
   </div>
 </div>
 
 <script>
-const DEFAULT_CFG = { cards: ["cur","today","cum","days","max"], mode: "balance" };
-const ALL_CARDS = ["cur","today","cum","topup","days","max"];
+const DEFAULT_CFG = { cards: ["cur","today","cum","topup","days","max","left"], mode: "balance" };
+const ALL_CARDS = ["cur","today","cum","topup","days","max","left"];
+
+/* ---------- 本地化（zh / en） ---------- */
+const I18N = {
+  "近 7 天": "Last 7 Days", "近 30 天": "Last 30 Days", "全部": "All",
+  "自定义显示": "Customize", "数据卡片（勾选显示）": "Cards (check to show)",
+  "当前余额": "Balance", "今日消耗": "Today", "累计消耗": "Total Usage",
+  "累计充值": "Top-ups", "记录天数": "Days", "区间最高余额": "Peak Balance",
+  "预估可用": "Days Left", "图表模式": "Chart Mode",
+  "余额趋势": "Balance", "每日使用量": "Daily Usage", "余额 + 使用量对比": "Balance + Usage",
+  "保存": "Save", "取消": "Cancel", "天": "d",
+  "余额": "Balance", "使用量": "Usage", "余额: ": "Balance: ", "使用量: ": "Usage: "
+};
+function T(key, lang) {
+  const l = lang || ((window.__DS_DATA__ && window.__DS_DATA__.lang) || "zh");
+  return l === "en" ? (I18N[key] || key) : key;
+}
+function applyLang(lang) {
+  document.querySelectorAll("[data-i18n]").forEach(el => {
+    el.textContent = T(el.getAttribute("data-i18n"), lang);
+  });
+}
 
 let range = 7;
 let cfg = loadCfg();
@@ -125,7 +148,12 @@ let cfg = loadCfg();
 function loadCfg() {
   try {
     const raw = localStorage.getItem("ds_dash_cfg");
-    if (raw) { const c = JSON.parse(raw); return Object.assign({}, DEFAULT_CFG, c); }
+    if (raw) {
+      const c = JSON.parse(raw);
+      // 新版本新增卡片自动补入（如预估可用），不干扰用户已有的隐藏选择
+      if (c.cards && c.cards.indexOf("left") < 0) c.cards = c.cards.concat("left");
+      return Object.assign({}, DEFAULT_CFG, c);
+    }
   } catch (e) {}
   return Object.assign({}, DEFAULT_CFG);
 }
@@ -223,14 +251,24 @@ function renderCards(D) {
   const daySet = new Set(entries.map(e => Math.floor((parseFloat(e.ts) || 0) / 86400)));
   const dayCount = daySet.size;
   const maxV = entries.reduce((m, e) => Math.max(m, parseFloat(e.total) || 0), 0);
+  // 预估可用天数：充值余额 ÷ 近 7 天日均消耗（数据不足时按已有天数）
+  const usage7 = usageByDay(usage, 7);
+  const daysCovered = usage7.length;
+  let daysLeft = null;
+  if (daysCovered >= 1 && cumTopup > 0.001) {
+    const dailyAvg = usage7.reduce((s, u) => s + u.amount, 0) / daysCovered;
+    if (dailyAvg > 0.001) daysLeft = cumTopup / dailyAvg;
+  }
+  const lang = D.lang || "zh";
 
   const data = {
-    cur: { label: "当前余额", cls: "bal", text: D.current ? sign + D.current : "—" },
-    today: { label: "今日消耗", cls: "use", text: todayUsage > 0.001 ? sign + todayUsage.toFixed(2) : "0.00" },
-    cum: { label: "累计消耗", cls: "use", text: cumUsage > 0.001 ? sign + cumUsage.toFixed(2) : "0.00" },
-    topup: { label: "累计充值", cls: "up", text: cumTopup > 0.001 ? "+" + sign + cumTopup.toFixed(2) : "0.00" },
-    days: { label: "记录天数", cls: "bal", text: dayCount ? dayCount + " 天" : "—" },
-    max: { label: "区间最高余额", cls: "bal", text: entries.length ? sign + maxV.toFixed(2) : "—" }
+    cur: { label: T("当前余额", lang), cls: "bal", text: D.current ? sign + D.current : "—" },
+    today: { label: T("今日消耗", lang), cls: "use", text: todayUsage > 0.001 ? sign + todayUsage.toFixed(2) : "0.00" },
+    cum: { label: T("累计消耗", lang), cls: "use", text: cumUsage > 0.001 ? sign + cumUsage.toFixed(2) : "0.00" },
+    topup: { label: T("累计充值", lang), cls: "up", text: cumTopup > 0.001 ? "+" + sign + cumTopup.toFixed(2) : "0.00" },
+    days: { label: T("记录天数", lang), cls: "bal", text: dayCount ? dayCount + " " + T("天", lang) : "—" },
+    max: { label: T("区间最高余额", lang), cls: "bal", text: entries.length ? sign + maxV.toFixed(2) : "—" },
+    left: { label: T("预估可用", lang), cls: (daysLeft != null && daysLeft < 1) ? "warn" : "bal", text: daysLeft != null ? Math.floor(daysLeft) + " " + T("天", lang) : "—" }
   };
 
   const visible = ALL_CARDS.filter(k => cfg.cards.indexOf(k) >= 0);
@@ -250,6 +288,7 @@ function renderDashboard() {
   if (D.accent) {
     document.documentElement.style.setProperty("--accent", D.accent);
   }
+  applyLang(D.lang);
   renderCards(D);
   drawChart(D, (D.entries || []).slice());
 }
@@ -259,6 +298,9 @@ function drawChart(D, all) {
   const chart = echarts.getInstanceByDom(el) || echarts.init(el);
   const sign = D.sign || "¥";
   const accent = D.accent || "#63d3c2";
+  const lang = D.lang || "zh";
+  const tBal = T("余额", lang), tUse = T("使用量", lang);
+  const tBalColon = T("余额: ", lang), tUseColon = T("使用量: ", lang);
 
   let list = all;
   if (range > 0) {
@@ -310,11 +352,11 @@ function drawChart(D, all) {
         formatter: function (params) {
           const p = params[0];
           const d = new Date(p.value[0]);
-          return dayKey(d.getTime() / 1000) + "<br/>使用量: " + sign + p.value[1].toFixed(2);
+          return dayKey(d.getTime() / 1000) + "<br/>" + tUseColon + sign + p.value[1].toFixed(2);
         }
       }),
       series: [{
-        name: "每日使用量",
+        name: tUse,
         type: "bar",
         data: useData,
         barMaxWidth: 30,
@@ -330,8 +372,8 @@ function drawChart(D, all) {
           params.forEach(p => {
             const d = new Date(p.value[0]);
             s += dayKey(d.getTime() / 1000) + "<br/>";
-            if (p.seriesName === "余额") s += "余额: " + sign + p.value[1].toFixed(2);
-            else s += "使用量: " + sign + p.value[1].toFixed(2);
+            if (p.seriesName === tBal) s += tBalColon + sign + p.value[1].toFixed(2);
+            else s += tUseColon + sign + p.value[1].toFixed(2);
             s += "<br/>";
           });
           return s;
@@ -340,7 +382,7 @@ function drawChart(D, all) {
       yAxis: [yCommon, Object.assign({}, yCommon, { splitLine: { show: false } })],
       series: [
         {
-          name: "余额", type: "line", data: balData, smooth: true,
+          name: tBal, type: "line", data: balData, smooth: true,
           symbol: "circle", symbolSize: 6, showSymbol: balData.length <= 40,
           yAxisIndex: 0,
           lineStyle: { width: 2.5, color: accent },
@@ -350,7 +392,7 @@ function drawChart(D, all) {
           ] } }
         },
         {
-          name: "使用量", type: "bar", data: useData, yAxisIndex: 1,
+          name: tUse, type: "bar", data: useData, yAxisIndex: 1,
           barMaxWidth: 22,
           itemStyle: { color: "rgba(255,159,74,0.75)", borderRadius: [4,4,0,0] }
         }
@@ -362,11 +404,11 @@ function drawChart(D, all) {
         formatter: function (params) {
           const p = params[0];
           const d = new Date(p.value[0]);
-          return dayKey(d.getTime() / 1000) + "<br/>余额: " + sign + p.value[1].toFixed(2);
+          return dayKey(d.getTime() / 1000) + "<br/>" + tBalColon + sign + p.value[1].toFixed(2);
         }
       }),
       series: [{
-        name: "余额",
+        name: tBal,
         type: "line", data: balData, smooth: true,
         symbol: "circle", symbolSize: 6, showSymbol: balData.length <= 40,
         lineStyle: { width: 2.5, color: accent },

@@ -101,10 +101,62 @@ enum SharedStore {
     /// 读余额缓存（看板/小组件共用）
     static func readBalance() -> [String: Any]? { read("balance.json") }
 
-    /// API Key 读取：优先共享配置，兜底旧钥匙串
+    /// API Key 读取：优先当前账号，兜底共享配置/旧钥匙串
     static func apiKey() -> String? {
+        if let a = currentAccount(), let k = a["key"] as? String, !k.isEmpty { return k }
         if let k = get("apiKey") as? String, !k.isEmpty { return k }
         return KeychainStore.get("apiKey")
+    }
+
+    // MARK: - 多账号管理
+    /// 账号列表：[[name, key], ...]（config["accounts"]）
+    static func accounts() -> [[String: Any]] {
+        get("accounts") as? [[String: Any]] ?? []
+    }
+    static func accountIndex() -> Int {
+        min(max(get("accountIndex") as? Int ?? 0, 0), max(accounts().count - 1, 0))
+    }
+    /// 当前账号 dict（无 accounts 时返回 nil）
+    static func currentAccount() -> [String: Any]? {
+        let list = accounts()
+        guard !list.isEmpty else { return nil }
+        return list[accountIndex()]
+    }
+    static func accountName() -> String {
+        if let a = currentAccount(), let n = a["name"] as? String, !n.isEmpty { return n }
+        return "Account \(accountIndex() + 1)"
+    }
+    /// 添加/更新当前账号 key：无 accounts 时创建；已有则更新当前项
+    static func upsertCurrentAccount(key: String) {
+        var list = accounts()
+        if list.isEmpty {
+            list.append(["name": "Account 1", "key": key])
+        } else {
+            let i = accountIndex()
+            var a = list[i]
+            a["key"] = key
+            list[i] = a
+        }
+        set("accounts", list)
+    }
+    static func addAccount(key: String) {
+        var list = accounts()
+        list.append(["name": "Account \(list.count + 1)", "key": key])
+        set("accounts", list)
+        set("accountIndex", list.count - 1)
+    }
+    static func removeCurrentAccount() {
+        var list = accounts()
+        guard !list.isEmpty else { return }
+        let i = accountIndex()
+        list.remove(at: i)
+        if list.isEmpty {
+            set("accounts", list)
+            set("accountIndex", 0)
+        } else {
+            set("accounts", list)
+            set("accountIndex", min(max(i, 0), list.count - 1))
+        }
     }
 
     // MARK: - 余额历史（看板数据源）
@@ -177,6 +229,129 @@ enum SharedStore {
     }
 }
 
+// MARK: - 本地化（zh / en）
+enum L {
+    static var lang: String { SharedStore.get("lang") as? String ?? "zh" }
+    static var isEn: Bool { lang == "en" }
+
+    private static let en: [String: String] = [
+        "DeepSeek 用量": "DeepSeek Usage",
+        "DeepSeek 用量面板 · 设置": "DeepSeek Usage · Settings",
+        "DeepSeek 用量看板": "DeepSeek Dashboard",
+        "基础": "General",
+        "外观": "Appearance",
+        "看板": "Dashboard",
+        "提醒": "Alerts",
+        "取消": "Cancel",
+        "保存": "Save",
+        "显示": "Show",
+        "API Key": "API Key",
+        "显示模式": "Display Mode",
+        "极简 · 只显示总余额": "Minimal · Balance only",
+        "标准 · 含赠送/充值明细": "Standard · Grant/Top-up detail",
+        "看板 · 余额+用量曲线": "Dashboard · Balance + Usage",
+        "数据源": "Data Source",
+        "DeepSeek 官方 API": "DeepSeek Official API",
+        "自定义网关（中转站）": "Custom Gateway",
+        "网关地址": "Gateway URL",
+        "自动刷新间隔": "Refresh Interval",
+        "秒": "s",
+        "主题色": "Accent Color",
+        "系统蓝": "Blue",
+        "石墨灰": "Graphite",
+        "绿色": "Green",
+        "橙色": "Orange",
+        "紫罗兰": "Violet",
+        "粉色": "Pink",
+        "青色": "Cyan",
+        "红色": "Red",
+        "面板透明度": "Panel Opacity",
+        "跟随系统": "System",
+        "深色": "Dark",
+        "浅色": "Light",
+        "语言": "Language",
+        "中文": "中文",
+        "English": "English",
+        "窗口置顶": "Always on Top",
+        "窗口始终置顶": "Always on Top",
+        "置顶": "Pin",
+        "取消置顶": "Unpin",
+        "悬浮窗看板显示卡片": "Panel Cards",
+        "默认时间范围": "Default Range",
+        "近 7 天": "Last 7 Days",
+        "近 30 天": "Last 30 Days",
+        "全部": "All",
+        "7天": "7D",
+        "30天": "30D",
+        "显示曲线图": "Show Chart",
+        "余额低于阈值时发送系统通知": "Notify when balance below threshold",
+        "提醒阈值（元）": "Threshold (¥)",
+        "清除历史数据…": "Clear History…",
+        "清除历史数据？": "Clear history data?",
+        "将删除本地记录的余额历史（看板曲线与累计统计会重新从当前余额开始记录）。": "This removes locally recorded balance history. Dashboard chart and totals restart from the current balance.",
+        "清除": "Clear",
+        "好": "OK",
+        "导出历史数据…": "Export History CSV…",
+        "账号管理": "Accounts",
+        "当前账号": "Account",
+        "添加账号": "Add Account",
+        "删除当前账号": "Remove Account",
+        "当前余额": "Balance",
+        "今日消耗": "Today",
+        "累计消耗": "Total Usage",
+        "累计充值": "Top-ups",
+        "记录天数": "Days",
+        "区间最高": "Peak",
+        "预估可用": "Days Left",
+        "天": "d",
+        "等待获取…": "Waiting…",
+        "加载中…": "Loading…",
+        "获取中…": "Fetching…",
+        "刷新": "Refresh",
+        "设置": "Settings",
+        "隐藏": "Hide",
+        "隐藏面板": "Hide Panel",
+        "显示面板": "Show Panel",
+        "设置…": "Settings…",
+        "用量看板…": "Dashboard…",
+        "退出": "Quit",
+        "开机自启": "Launch at Login",
+        "总余额": "Balance",
+        "赠送余额": "Granted",
+        "充值余额": "Top-up",
+        "未设置 Key": "No API Key",
+        "点「设置」填入 API Key": "Click Settings to add your API Key",
+        "未配置网关": "No Gateway",
+        "点「设置」填写网关地址": "Click Settings to set gateway URL",
+        "可用": "OK",
+        "余额不足": "Low Balance",
+        "暂无数据，等待记录…": "No data yet…",
+        "无效 URL": "Invalid URL",
+        "Key 无效或已过期": "Invalid or expired Key",
+        "解析失败：": "Parse error: ",
+        "接口无余额数据": "No balance data",
+        "非 JSON 对象": "Not a JSON object",
+        "无响应数据": "No response data",
+        "请求失败 HTTP ": "HTTP ",
+        "DeepSeek 余额不足": "DeepSeek balance low",
+        "无法开启开机自启": "Cannot enable launch at login",
+        "无法关闭开机自启": "Cannot disable launch at login",
+        "请把应用移到「应用程序」文件夹后重试，或到 系统设置 → 通用 → 登录项 手动调整。": "Move the app to the Applications folder and retry, or enable it manually in System Settings → General → Login Items.",
+    ]
+
+    static func t(_ key: String) -> String {
+        guard isEn else { return key }
+        return en[key] ?? key
+    }
+
+    /// 带插值的本地化：key 为模板，args 按序替换 %@
+    static func fmt(_ key: String, _ args: String...) -> String {
+        var s = t(key)
+        for a in args { s = s.replacingOccurrences(of: "%@", with: a) }
+        return s
+    }
+}
+
 // MARK: - 通用余额模型（兼容 DeepSeek balance_infos 与 OpenAI 网关 data[] 两种返回）
 struct AccountBalance {
     var currency: String = "CNY"
@@ -190,12 +365,12 @@ enum BalanceAPIError: LocalizedError {
     case invalidURL, unauthorized, http(Int), network(String), decode(String), empty
     var errorDescription: String? {
         switch self {
-        case .invalidURL:   return "无效 URL"
-        case .unauthorized: return "Key 无效或已过期"
-        case .http(let c):  return "请求失败 HTTP \(c)"
+        case .invalidURL:   return L.t("无效 URL")
+        case .unauthorized: return L.t("Key 无效或已过期")
+        case .http(let c):  return L.t("请求失败 HTTP ") + "\(c)"
         case .network(let m): return m
-        case .decode(let m): return "解析失败：\(m)"
-        case .empty:        return "接口无余额数据"
+        case .decode(let m): return L.t("解析失败：") + m
+        case .empty:        return L.t("接口无余额数据")
         }
     }
 }
@@ -467,7 +642,7 @@ final class FloatingPanel: NSPanel {
         guard pinButton != nil else { return }
         if #available(macOS 11.0, *) {
             pinButton.image = NSImage(systemSymbolName: alwaysOnTop ? "pin.fill" : "pin",
-                                      accessibilityDescription: "置顶")
+                                      accessibilityDescription: L.t("置顶"))
         }
         pinButton.contentTintColor = alwaysOnTop ? accentColor : .secondaryLabelColor
         pinButton.toolTip = alwaysOnTop ? "取消置顶" : "窗口置顶"
@@ -549,18 +724,18 @@ final class FloatingPanel: NSPanel {
         let row2LabelY: CGFloat = hasChart ? 168 : 62
         let row2ValY: CGFloat = hasChart ? 148 : 44
 
-        let title = DragLabel(labelWithString: "DeepSeek 用量")
+        let title = DragLabel(labelWithString: L.t("DeepSeek 用量"))
         title.font = .systemFont(ofSize: 11)
         title.textColor = .secondaryLabelColor
-        title.frame = NSRect(x: 12, y: titleY, width: 110, height: 14)
+        title.frame = NSRect(x: 12, y: titleY, width: 140, height: 14)
         content.addSubview(title)
 
-        let seg = NSSegmentedControl(labels: ["7天", "30天", "全部"], trackingMode: .selectOne,
+        let seg = NSSegmentedControl(labels: [L.t("7天"), L.t("30天"), L.t("全部")], trackingMode: .selectOne,
                                      target: self, action: #selector(dashRangeChanged))
         seg.selectedSegment = dashRange == 30 ? 1 : (dashRange == 0 ? 2 : 0)
         seg.segmentStyle = .rounded
         if #available(macOS 11.0, *) { seg.selectedSegmentBezelColor = accentColor }
-        seg.frame = NSRect(x: 196, y: segY, width: 110, height: 22)
+        seg.frame = NSRect(x: 196, y: segY, width: 130, height: 22)
         content.addSubview(seg)
         rangeControl = seg
 
@@ -583,7 +758,7 @@ final class FloatingPanel: NSPanel {
             let x = 12 + CGFloat(col) * (cardW + 8)
             let labelY: CGFloat = row == 0 ? row1LabelY : row2LabelY
             let valY: CGFloat = row == 0 ? row1ValY : row2ValY
-            let label = DragLabel(labelWithString: spec.1)
+            let label = DragLabel(labelWithString: L.t(spec.1))
             label.font = .systemFont(ofSize: 10)
             label.textColor = .secondaryLabelColor
             label.frame = NSRect(x: x, y: labelY, width: cardW, height: 14)
@@ -652,7 +827,7 @@ final class FloatingPanel: NSPanel {
             return Int(floor(t / 86400))
         })
         let days = daySet.count
-        dashboardValues["记录天数"]?.stringValue = days > 0 ? "\(days) 天" : "—"
+        dashboardValues["记录天数"]?.stringValue = days > 0 ? "\(days) " + L.t("天") : "—"
         let maxV = entries.reduce(0.0) { max($0, Double($1["total"] as? String ?? "0") ?? 0) }
         dashboardValues["区间最高"]?.stringValue = maxV > 0 ? "\(sign) \(String(format: "%.2f", maxV))" : "—"
 
@@ -667,10 +842,10 @@ final class FloatingPanel: NSPanel {
 
     private func buildMiniLayout(_ content: NSView) {
         // 标题 + 状态
-        let title = DragLabel(labelWithString: "DeepSeek 用量")
+        let title = DragLabel(labelWithString: L.t("DeepSeek 用量"))
         title.font = .systemFont(ofSize: 11)
         title.textColor = .secondaryLabelColor
-        title.frame = NSRect(x: 12, y: 78, width: 110, height: 14)
+        title.frame = NSRect(x: 12, y: 78, width: 120, height: 14)
 
         statusDot = DragView()
         statusDot.wantsLayer = true
@@ -678,7 +853,7 @@ final class FloatingPanel: NSPanel {
         statusDot.layer?.backgroundColor = NSColor.systemGray.cgColor
         statusDot.frame = NSRect(x: 260, y: 80, width: 8, height: 8)
 
-        statusLabel = DragLabel(labelWithString: "加载中…")
+        statusLabel = DragLabel(labelWithString: L.t("加载中…"))
         statusLabel.font = .systemFont(ofSize: 11)
         statusLabel.textColor = .secondaryLabelColor
         statusLabel.frame = NSRect(x: 274, y: 77, width: 80, height: 14)
@@ -690,16 +865,16 @@ final class FloatingPanel: NSPanel {
         totalValue.frame = NSRect(x: 12, y: 38, width: 296, height: 32)
 
         // 底部：倒计时 + 按钮
-        footerLabel = DragLabel(labelWithString: "等待获取…")
+        footerLabel = DragLabel(labelWithString: L.t("等待获取…"))
         footerLabel.font = .systemFont(ofSize: 10)
         footerLabel.textColor = .tertiaryLabelColor
         footerLabel.frame = NSRect(x: 12, y: 18, width: 170, height: 14)
 
-        refreshButton = makeButton("刷新", action: #selector(refresh))
+        refreshButton = makeButton(L.t("刷新"), action: #selector(refresh))
         refreshButton.frame = NSRect(x: 186, y: 4, width: 42, height: 24)
-        settingsButton = makeButton("设置", action: #selector(openSettings))
+        settingsButton = makeButton(L.t("设置"), action: #selector(openSettings))
         settingsButton.frame = NSRect(x: 230, y: 4, width: 42, height: 24)
-        quitButton = makeButton("隐藏", action: #selector(hidePanel))
+        quitButton = makeButton(L.t("隐藏"), action: #selector(hidePanel))
         quitButton.frame = NSRect(x: 274, y: 4, width: 42, height: 24)
 
         for v in [title, statusDot!, statusLabel!, totalValue!, footerLabel!,
@@ -720,7 +895,7 @@ final class FloatingPanel: NSPanel {
         statusDot.layer?.backgroundColor = NSColor.systemGray.cgColor
         statusDot.frame = NSRect(x: 292, y: 218, width: 8, height: 8)
 
-        statusLabel = DragLabel(labelWithString: "加载中…")
+        statusLabel = DragLabel(labelWithString: L.t("加载中…"))
         statusLabel.font = .systemFont(ofSize: 12)
         statusLabel.textColor = .secondaryLabelColor
         statusLabel.frame = NSRect(x: 306, y: 214, width: 90, height: 16)
@@ -736,7 +911,7 @@ final class FloatingPanel: NSPanel {
         divider.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.12).cgColor
         divider.frame = NSRect(x: 16, y: 200, width: 308, height: 1)
 
-        let totalLabel = DragLabel(labelWithString: "总余额")
+        let totalLabel = DragLabel(labelWithString: L.t("总余额"))
         totalLabel.font = .systemFont(ofSize: 12)
         totalLabel.textColor = .secondaryLabelColor
         totalLabel.frame = NSRect(x: 16, y: 170, width: 80, height: 20)
@@ -747,7 +922,7 @@ final class FloatingPanel: NSPanel {
         totalValue.alignment = .right
         totalValue.frame = NSRect(x: 180, y: 166, width: 144, height: 24)
 
-        let grantedLabel = DragLabel(labelWithString: "赠送余额")
+        let grantedLabel = DragLabel(labelWithString: L.t("赠送余额"))
         grantedLabel.font = .systemFont(ofSize: 12)
         grantedLabel.textColor = .secondaryLabelColor
         grantedLabel.frame = NSRect(x: 16, y: 142, width: 80, height: 20)
@@ -758,7 +933,7 @@ final class FloatingPanel: NSPanel {
         grantedValue.alignment = .right
         grantedValue.frame = NSRect(x: 180, y: 138, width: 144, height: 22)
 
-        let toppedLabel = DragLabel(labelWithString: "充值余额")
+        let toppedLabel = DragLabel(labelWithString: L.t("充值余额"))
         toppedLabel.font = .systemFont(ofSize: 12)
         toppedLabel.textColor = .secondaryLabelColor
         toppedLabel.frame = NSRect(x: 16, y: 114, width: 80, height: 20)
@@ -769,16 +944,16 @@ final class FloatingPanel: NSPanel {
         toppedValue.alignment = .right
         toppedValue.frame = NSRect(x: 180, y: 110, width: 144, height: 22)
 
-        footerLabel = DragLabel(labelWithString: "等待获取…")
+        footerLabel = DragLabel(labelWithString: L.t("等待获取…"))
         footerLabel.font = .systemFont(ofSize: 11)
         footerLabel.textColor = .tertiaryLabelColor
         footerLabel.frame = NSRect(x: 16, y: 78, width: 300, height: 16)
 
-        refreshButton = makeButton("刷新", action: #selector(refresh))
+        refreshButton = makeButton(L.t("刷新"), action: #selector(refresh))
         refreshButton.frame = NSRect(x: 150, y: 28, width: 56, height: 26)
-        settingsButton = makeButton("设置", action: #selector(openSettings))
+        settingsButton = makeButton(L.t("设置"), action: #selector(openSettings))
         settingsButton.frame = NSRect(x: 210, y: 28, width: 56, height: 26)
-        quitButton = makeButton("隐藏", action: #selector(hidePanel))
+        quitButton = makeButton(L.t("隐藏"), action: #selector(hidePanel))
         quitButton.frame = NSRect(x: 270, y: 28, width: 56, height: 26)
 
         for v in [title, statusDot!, statusLabel!, divider,
@@ -850,17 +1025,17 @@ final class FloatingPanel: NSPanel {
         }
         guard let key = SharedStore.apiKey(), !key.isEmpty else {
             statusDot.layer?.backgroundColor = NSColor.systemOrange.cgColor
-            statusLabel.stringValue = "未设置 Key"
-            footerLabel.stringValue = "点「设置」填入 API Key"
+            statusLabel.stringValue = L.t("未设置 Key")
+            footerLabel.stringValue = L.t("点「设置」填入 API Key")
             return
         }
         guard let base = resolvedBaseURL() else {
             statusDot.layer?.backgroundColor = NSColor.systemOrange.cgColor
-            statusLabel.stringValue = "未配置网关"
-            footerLabel.stringValue = "点「设置」填写网关地址"
+            statusLabel.stringValue = L.t("未配置网关")
+            footerLabel.stringValue = L.t("点「设置」填写网关地址")
             return
         }
-        statusLabel.stringValue = "获取中…"
+        statusLabel.stringValue = L.t("获取中…")
         api.fetchBalance(baseURL: base, key: key) { [weak self] result in
             DispatchQueue.main.async {
                 guard let self = self else { return }
@@ -890,10 +1065,10 @@ final class FloatingPanel: NSPanel {
 
         if b.isAvailable {
             statusDot.layer?.backgroundColor = NSColor.systemGreen.cgColor
-            statusLabel.stringValue = "可用"
+            statusLabel.stringValue = L.t("可用")
         } else {
             statusDot.layer?.backgroundColor = NSColor.systemRed.cgColor
-            statusLabel.stringValue = "余额不足"
+            statusLabel.stringValue = L.t("余额不足")
         }
         lastUpdated = Self.timeFormatter.string(from: Date())
         SharedStore.writeBalance(b, sign: sign)
@@ -914,8 +1089,10 @@ final class FloatingPanel: NSPanel {
                 SharedStore.set("notifAuthAsked", true)
             }
             let content = UNMutableNotificationContent()
-            content.title = "DeepSeek 余额不足"
-            content.body = "当前余额 \(sign) \(String(format: "%.2f", total))，低于提醒阈值 \(sign) \(String(format: "%.2f", lowBalanceThreshold))"
+            content.title = L.t("DeepSeek 余额不足")
+            content.body = L.isEn
+                ? "Balance \(sign) \(String(format: "%.2f", total)) is below alert threshold \(sign) \(String(format: "%.2f", lowBalanceThreshold))"
+                : "当前余额 \(sign) \(String(format: "%.2f", total))，低于提醒阈值 \(sign) \(String(format: "%.2f", lowBalanceThreshold))"
             content.sound = .default
             let req = UNNotificationRequest(identifier: "ds-low-balance", content: content, trigger: nil)
             center.add(req)
@@ -928,8 +1105,8 @@ final class FloatingPanel: NSPanel {
     private func updateFooter() {
         guard footerLabel != nil else { return }
         var t = "等待获取…"
-        if !lastUpdated.isEmpty { t = "更新于 \(lastUpdated)" }
-        t += " · \(secondsLeft)s 后刷新"
+        if !lastUpdated.isEmpty { t = L.t("更新于 %@").replacingOccurrences(of: "%@", with: lastUpdated) }
+        t += (L.isEn ? " · %@s" : " · %@s 后刷新").replacingOccurrences(of: "%@", with: String(secondsLeft))
         footerLabel.stringValue = t
     }
 
@@ -994,7 +1171,7 @@ final class MiniChartView: NSView {
                 .font: NSFont.systemFont(ofSize: 10),
                 .foregroundColor: NSColor.tertiaryLabelColor
             ]
-            ("暂无数据，等待记录…" as NSString).draw(at: NSPoint(x: 8, y: bounds.height / 2 - 6), withAttributes: attrs)
+            (L.t("暂无数据，等待记录…") as NSString).draw(at: NSPoint(x: 8, y: bounds.height / 2 - 6), withAttributes: attrs)
             return
         }
         let vals = points.map { $0.total }
@@ -1051,27 +1228,30 @@ final class SettingsWindow: NSWindow {
 
     // 基础
     private let keyField = NSSecureTextField(frame: .zero)
-    private let showKey = NSButton(checkboxWithTitle: "显示", target: nil, action: nil)
+    private let showKey = NSButton(checkboxWithTitle: L.t("显示"), target: nil, action: nil)
     private let modePopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let sourcePopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let baseField = NSTextField(frame: .zero)
     private let intervalPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let intervals = [15, 30, 60, 120, 300]
     // 外观
-    private let topCheck = NSButton(checkboxWithTitle: "窗口始终置顶", target: nil, action: nil)
+    private let topCheck = NSButton(checkboxWithTitle: L.t("窗口始终置顶"), target: nil, action: nil)
     private let appearancePopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let langPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let opacitySlider = NSSlider(value: 1.0, minValue: 0.5, maxValue: 1.0, target: nil, action: nil)
     private let opacityValue = NSTextField(labelWithString: "100%")
     private var accentButtons: [NSButton] = []
     private var currentAccent: Int = 0
+    // 账号
+    private let accountPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     // 看板
     private let dashCardChecks = ["当前余额", "今日消耗", "累计消耗", "累计充值", "记录天数", "区间最高"].map {
-        NSButton(checkboxWithTitle: $0, target: nil, action: nil)
+        NSButton(checkboxWithTitle: L.t($0), target: nil, action: nil)
     }
     private let dashRangePopup = NSPopUpButton(frame: .zero, pullsDown: false)
-    private let chartCheck = NSButton(checkboxWithTitle: "显示曲线图", target: nil, action: nil)
+    private let chartCheck = NSButton(checkboxWithTitle: L.t("显示曲线图"), target: nil, action: nil)
     // 提醒
-    private let lowCheck = NSButton(checkboxWithTitle: "余额低于阈值时发送系统通知", target: nil, action: nil)
+    private let lowCheck = NSButton(checkboxWithTitle: L.t("余额低于阈值时发送系统通知"), target: nil, action: nil)
     private let thresholdField = NSTextField(frame: .zero)
     // 标签栏
     private var tabSeg: NSSegmentedControl!
@@ -1083,7 +1263,7 @@ final class SettingsWindow: NSWindow {
          dashCards: [Int], dashRange: Int, showChart: Bool, lowAlert: Bool, lowThreshold: Double) {
         super.init(contentRect: NSRect(x: 0, y: 0, width: 400, height: 454),
                    styleMask: [.titled, .closable], backing: .buffered, defer: false)
-        title = "DeepSeek 用量面板 · 设置"
+        title = L.t("DeepSeek 用量面板 · 设置")
         isReleasedWhenClosed = false
         buildUI(displayMode: displayMode, sourceType: sourceType, baseURL: baseURL,
                 apiKey: apiKey, interval: interval, alwaysOnTop: alwaysOnTop,
@@ -1111,7 +1291,7 @@ final class SettingsWindow: NSWindow {
         let content = contentView!
 
         // ---- 标签栏（分段控件，高 30，点击区域大）----
-        tabSeg = NSSegmentedControl(labels: ["基础", "外观", "看板", "提醒"],
+        tabSeg = NSSegmentedControl(labels: [L.t("基础"), L.t("外观"), L.t("看板"), L.t("提醒")],
                                     trackingMode: .selectOne, target: self, action: #selector(tabChanged))
         tabSeg.selectedSegment = 0
         tabSeg.segmentStyle = .rounded
@@ -1134,13 +1314,13 @@ final class SettingsWindow: NSWindow {
         switchTab(0)
 
         // 按钮
-        let cancelButton = NSButton(title: "取消", target: self, action: #selector(cancel))
+        let cancelButton = NSButton(title: L.t("取消"), target: self, action: #selector(cancel))
         cancelButton.bezelStyle = .rounded
         cancelButton.keyEquivalent = "\u{1b}"
         cancelButton.frame = NSRect(x: 208, y: 8, width: 82, height: 28)
         content.addSubview(cancelButton)
 
-        let saveButton = NSButton(title: "保存", target: self, action: #selector(save))
+        let saveButton = NSButton(title: L.t("保存"), target: self, action: #selector(save))
         saveButton.bezelStyle = .rounded
         saveButton.keyEquivalent = "\r"
         saveButton.frame = NSRect(x: 300, y: 8, width: 76, height: 28)
@@ -1162,36 +1342,65 @@ final class SettingsWindow: NSWindow {
     private func buildBasicTab(displayMode: Int, sourceType: Int, baseURL: String, apiKey: String, interval: Int) -> NSView {
         let v = NSView(frame: NSRect(x: 0, y: 0, width: 380, height: 372))
 
-        v.addSubview(label("API Key", NSRect(x: 20, y: 308, width: 64, height: 20)))
+        // 账号管理（多账号切换）
+        v.addSubview(label(L.t("当前账号"), NSRect(x: 20, y: 344, width: 90, height: 20)))
+        accountPopup.frame = NSRect(x: 114, y: 340, width: 170, height: 26)
+        accountPopup.removeAllItems()
+        let accs = SharedStore.accounts()
+        if accs.isEmpty {
+            accountPopup.addItem(withTitle: "Account 1")
+            accountPopup.lastItem?.tag = 0
+        } else {
+            for (i, a) in accs.enumerated() {
+                accountPopup.addItem(withTitle: a["name"] as? String ?? "Account \(i + 1)")
+                accountPopup.lastItem?.tag = i
+            }
+        }
+        accountPopup.selectItem(withTag: SharedStore.accountIndex())
+        accountPopup.target = self
+        accountPopup.action = #selector(accountChanged)
+        v.addSubview(accountPopup)
+        let addBtn = NSButton(title: "+", target: self, action: #selector(addAccountAction))
+        addBtn.bezelStyle = .rounded
+        addBtn.frame = NSRect(x: 290, y: 341, width: 38, height: 24)
+        addBtn.toolTip = L.t("添加账号")
+        v.addSubview(addBtn)
+        let delBtn = NSButton(title: "−", target: self, action: #selector(removeAccountAction))
+        delBtn.bezelStyle = .rounded
+        delBtn.frame = NSRect(x: 332, y: 341, width: 38, height: 24)
+        delBtn.toolTip = L.t("删除当前账号")
+        v.addSubview(delBtn)
+
+        v.addSubview(label(L.t("API Key"), NSRect(x: 20, y: 300, width: 64, height: 20)))
         keyField.stringValue = apiKey
         keyField.placeholderString = "sk-…"
         keyField.font = .systemFont(ofSize: 12)
-        keyField.frame = NSRect(x: 88, y: 304, width: 210, height: 24)
+        keyField.frame = NSRect(x: 88, y: 296, width: 210, height: 24)
         v.addSubview(keyField)
         showKey.target = self
         showKey.action = #selector(toggleKeyVisible)
-        showKey.frame = NSRect(x: 306, y: 306, width: 58, height: 20)
+        showKey.frame = NSRect(x: 306, y: 298, width: 58, height: 20)
         v.addSubview(showKey)
 
-        v.addSubview(label("显示模式", NSRect(x: 20, y: 264, width: 90, height: 20)))
-        modePopup.frame = NSRect(x: 114, y: 260, width: 190, height: 26)
+        v.addSubview(label(L.t("显示模式"), NSRect(x: 20, y: 256, width: 90, height: 20)))
+        modePopup.frame = NSRect(x: 114, y: 252, width: 190, height: 26)
         modePopup.removeAllItems()
-        modePopup.addItem(withTitle: "极简 · 只显示总余额")
+        modePopup.addItem(withTitle: L.t("极简 · 只显示总余额"))
         modePopup.lastItem?.tag = 0
-        modePopup.addItem(withTitle: "标准 · 含赠送/充值明细")
+        modePopup.addItem(withTitle: L.t("标准 · 含赠送/充值明细"))
         modePopup.lastItem?.tag = 1
-        modePopup.addItem(withTitle: "看板 · 余额+用量曲线")
+        modePopup.addItem(withTitle: L.t("看板 · 余额+用量曲线"))
         modePopup.lastItem?.tag = 2
         modePopup.selectItem(withTag: displayMode)
         if modePopup.selectedTag() == -1 { modePopup.selectItem(withTag: 0) }
         v.addSubview(modePopup)
 
-        v.addSubview(label("数据源", NSRect(x: 20, y: 222, width: 90, height: 20)))
+        v.addSubview(label(L.t("数据源"), NSRect(x: 20, y: 222, width: 90, height: 20)))
         sourcePopup.frame = NSRect(x: 114, y: 218, width: 190, height: 26)
         sourcePopup.removeAllItems()
-        sourcePopup.addItem(withTitle: "DeepSeek 官方 API")
+        sourcePopup.addItem(withTitle: L.t("DeepSeek 官方 API"))
         sourcePopup.lastItem?.tag = 0
-        sourcePopup.addItem(withTitle: "自定义网关（中转站）")
+        sourcePopup.addItem(withTitle: L.t("自定义网关（中转站）"))
         sourcePopup.lastItem?.tag = 1
         sourcePopup.selectItem(withTag: sourceType)
         if sourcePopup.selectedTag() == -1 { sourcePopup.selectItem(withTag: 0) }
@@ -1199,19 +1408,19 @@ final class SettingsWindow: NSWindow {
         sourcePopup.action = #selector(sourceChanged)
         v.addSubview(sourcePopup)
 
-        v.addSubview(label("网关地址", NSRect(x: 20, y: 180, width: 90, height: 20)))
+        v.addSubview(label(L.t("网关地址"), NSRect(x: 20, y: 172, width: 90, height: 20)))
         baseField.stringValue = baseURL
-        baseField.placeholderString = "https://your-gateway.com（可选 /v1）"
+        baseField.placeholderString = L.isEn ? "https://your-gateway.com (optional /v1)" : "https://your-gateway.com（可选 /v1）"
         baseField.font = .systemFont(ofSize: 12)
-        baseField.frame = NSRect(x: 114, y: 176, width: 250, height: 24)
+        baseField.frame = NSRect(x: 114, y: 168, width: 250, height: 24)
         baseField.isEnabled = (sourcePopup.selectedTag() == 1)
         v.addSubview(baseField)
 
-        v.addSubview(label("自动刷新间隔", NSRect(x: 20, y: 138, width: 100, height: 20)))
-        intervalPopup.frame = NSRect(x: 124, y: 134, width: 120, height: 26)
+        v.addSubview(label(L.t("自动刷新间隔"), NSRect(x: 20, y: 130, width: 100, height: 20)))
+        intervalPopup.frame = NSRect(x: 124, y: 126, width: 120, height: 26)
         intervalPopup.removeAllItems()
         for iv in intervals {
-            intervalPopup.addItem(withTitle: "\(iv) 秒")
+            intervalPopup.addItem(withTitle: "\(iv) " + L.t("秒"))
             intervalPopup.lastItem?.tag = iv
         }
         intervalPopup.selectItem(withTag: interval)
@@ -1224,7 +1433,7 @@ final class SettingsWindow: NSWindow {
     private func buildAppearanceTab(alwaysOnTop: Bool, opacity: Double, accent: Int, appearanceMode: Int) -> NSView {
         let v = NSView(frame: NSRect(x: 0, y: 0, width: 380, height: 372))
 
-        v.addSubview(label("主题色", NSRect(x: 20, y: 308, width: 90, height: 20)))
+        v.addSubview(label(L.t("主题色"), NSRect(x: 20, y: 308, width: 90, height: 20)))
         currentAccent = accent
         for (i, t) in AccentTheme.allCases.enumerated() {
             let x = 112 + CGFloat(i) * 30
@@ -1236,13 +1445,13 @@ final class SettingsWindow: NSWindow {
             b.layer?.cornerRadius = 10
             b.layer?.masksToBounds = true
             b.frame = NSRect(x: x, y: 304, width: 20, height: 20)
-            b.toolTip = t.name
+            b.toolTip = L.t(t.name)
             v.addSubview(b)
             accentButtons.append(b)
         }
         updateAccentSelection()
 
-        v.addSubview(label("面板透明度", NSRect(x: 20, y: 266, width: 90, height: 20)))
+        v.addSubview(label(L.t("面板透明度"), NSRect(x: 20, y: 266, width: 90, height: 20)))
         opacitySlider.doubleValue = max(0.5, min(1.0, opacity))
         opacitySlider.isContinuous = true
         opacitySlider.target = self
@@ -1255,22 +1464,32 @@ final class SettingsWindow: NSWindow {
         opacityValue.stringValue = "\(Int(round(opacity * 100)))%"
         v.addSubview(opacityValue)
 
-        v.addSubview(label("外观", NSRect(x: 20, y: 224, width: 90, height: 20)))
+        v.addSubview(label(L.t("外观"), NSRect(x: 20, y: 224, width: 90, height: 20)))
         appearancePopup.frame = NSRect(x: 114, y: 220, width: 150, height: 26)
         appearancePopup.removeAllItems()
-        appearancePopup.addItem(withTitle: "跟随系统")
+        appearancePopup.addItem(withTitle: L.t("跟随系统"))
         appearancePopup.lastItem?.tag = 0
-        appearancePopup.addItem(withTitle: "深色")
+        appearancePopup.addItem(withTitle: L.t("深色"))
         appearancePopup.lastItem?.tag = 1
-        appearancePopup.addItem(withTitle: "浅色")
+        appearancePopup.addItem(withTitle: L.t("浅色"))
         appearancePopup.lastItem?.tag = 2
         appearancePopup.selectItem(withTag: appearanceMode)
         if appearancePopup.selectedTag() == -1 { appearancePopup.selectItem(withTag: 0) }
         v.addSubview(appearancePopup)
 
-        v.addSubview(label("窗口置顶", NSRect(x: 20, y: 180, width: 90, height: 20)))
+        v.addSubview(label(L.t("语言"), NSRect(x: 20, y: 182, width: 90, height: 20)))
+        langPopup.frame = NSRect(x: 114, y: 178, width: 150, height: 26)
+        langPopup.removeAllItems()
+        langPopup.addItem(withTitle: "中文")
+        langPopup.lastItem?.tag = 0
+        langPopup.addItem(withTitle: "English")
+        langPopup.lastItem?.tag = 1
+        langPopup.selectItem(withTag: L.isEn ? 1 : 0)
+        v.addSubview(langPopup)
+
+        v.addSubview(label(L.t("窗口置顶"), NSRect(x: 20, y: 140, width: 90, height: 20)))
         topCheck.state = alwaysOnTop ? .on : .off
-        topCheck.frame = NSRect(x: 112, y: 178, width: 160, height: 20)
+        topCheck.frame = NSRect(x: 112, y: 138, width: 160, height: 20)
         v.addSubview(topCheck)
         return v
     }
@@ -1278,20 +1497,20 @@ final class SettingsWindow: NSWindow {
     // MARK: 看板
     private func buildDashboardTab(dashCards: [Int], dashRange: Int, showChart: Bool) -> NSView {
         let v = NSView(frame: NSRect(x: 0, y: 0, width: 380, height: 372))
-        v.addSubview(label("悬浮窗看板显示卡片", NSRect(x: 20, y: 308, width: 150, height: 20)))
+        v.addSubview(label(L.t("悬浮窗看板显示卡片"), NSRect(x: 20, y: 308, width: 150, height: 20)))
         for (i, cb) in dashCardChecks.enumerated() {
             cb.state = dashCards.contains(i) ? .on : .off
             cb.frame = NSRect(x: 112 + CGFloat(i / 3) * 120, y: 278 - CGFloat(i % 3) * 34, width: 110, height: 22)
             v.addSubview(cb)
         }
-        v.addSubview(label("默认时间范围", NSRect(x: 20, y: 168, width: 100, height: 20)))
+        v.addSubview(label(L.t("默认时间范围"), NSRect(x: 20, y: 168, width: 100, height: 20)))
         dashRangePopup.frame = NSRect(x: 124, y: 164, width: 120, height: 26)
         dashRangePopup.removeAllItems()
-        dashRangePopup.addItem(withTitle: "近 7 天")
+        dashRangePopup.addItem(withTitle: L.t("近 7 天"))
         dashRangePopup.lastItem?.tag = 7
-        dashRangePopup.addItem(withTitle: "近 30 天")
+        dashRangePopup.addItem(withTitle: L.t("近 30 天"))
         dashRangePopup.lastItem?.tag = 30
-        dashRangePopup.addItem(withTitle: "全部")
+        dashRangePopup.addItem(withTitle: L.t("全部"))
         dashRangePopup.lastItem?.tag = 0
         dashRangePopup.selectItem(withTag: dashRange)
         if dashRangePopup.selectedTag() == -1 { dashRangePopup.selectItem(withTag: 7) }
@@ -1307,25 +1526,101 @@ final class SettingsWindow: NSWindow {
     private func buildAlertTab(lowAlert: Bool, lowThreshold: Double) -> NSView {
         let v = NSView(frame: NSRect(x: 0, y: 0, width: 380, height: 372))
         lowCheck.state = lowAlert ? .on : .off
-        lowCheck.frame = NSRect(x: 20, y: 300, width: 260, height: 22)
+        lowCheck.frame = NSRect(x: 20, y: 300, width: 280, height: 22)
         v.addSubview(lowCheck)
 
-        v.addSubview(label("提醒阈值（元）", NSRect(x: 20, y: 260, width: 100, height: 20)))
+        v.addSubview(label(L.t("提醒阈值（元）"), NSRect(x: 20, y: 260, width: 100, height: 20)))
         thresholdField.stringValue = String(format: "%.0f", lowThreshold)
         thresholdField.font = .systemFont(ofSize: 12)
         thresholdField.frame = NSRect(x: 124, y: 256, width: 80, height: 24)
         v.addSubview(thresholdField)
 
-        let clearButton = NSButton(title: "清除历史数据…", target: self, action: #selector(clearHistory))
+        let clearButton = NSButton(title: L.t("清除历史数据…"), target: self, action: #selector(clearHistory))
         clearButton.bezelStyle = .rounded
         clearButton.frame = NSRect(x: 20, y: 200, width: 140, height: 30)
         v.addSubview(clearButton)
+
+        let exportButton = NSButton(title: L.t("导出历史数据…"), target: self, action: #selector(exportCSV))
+        exportButton.bezelStyle = .rounded
+        exportButton.frame = NSRect(x: 20, y: 150, width: 140, height: 30)
+        v.addSubview(exportButton)
         return v
     }
 
     // MARK: - 动作
     @objc private func toggleKeyVisible() {
         (keyField.cell as? NSSecureTextFieldCell)?.echosBullets = !(showKey.state == .on)
+    }
+
+    /// 切换当前账号：更新 accountIndex + keyField 显示该账号 Key
+    @objc private func accountChanged() {
+        let i = accountPopup.selectedTag()
+        SharedStore.set("accountIndex", max(0, i))
+        if let a = SharedStore.currentAccount(), let k = a["key"] as? String {
+            keyField.stringValue = k
+        }
+    }
+
+    @objc private func addAccountAction() {
+        let key = keyField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        SharedStore.addAccount(key: key)
+        // 刷新账号下拉
+        accountPopup.removeAllItems()
+        let accs = SharedStore.accounts()
+        for (i, a) in accs.enumerated() {
+            accountPopup.addItem(withTitle: a["name"] as? String ?? "Account \(i + 1)")
+            accountPopup.lastItem?.tag = i
+        }
+        accountPopup.selectItem(withTag: SharedStore.accountIndex())
+    }
+
+    @objc private func removeAccountAction() {
+        SharedStore.removeCurrentAccount()
+        accountPopup.removeAllItems()
+        let accs = SharedStore.accounts()
+        if accs.isEmpty {
+            accountPopup.addItem(withTitle: "Account 1")
+            accountPopup.lastItem?.tag = 0
+        } else {
+            for (i, a) in accs.enumerated() {
+                accountPopup.addItem(withTitle: a["name"] as? String ?? "Account \(i + 1)")
+                accountPopup.lastItem?.tag = i
+            }
+        }
+        accountPopup.selectItem(withTag: SharedStore.accountIndex())
+        keyField.stringValue = SharedStore.apiKey() ?? ""
+    }
+
+    /// 导出历史数据为 CSV 到 ~/Downloads
+    @objc private func exportCSV() {
+        let entries = SharedStore.historyEntries()
+        var csv = "timestamp,balance\n"
+        let df = DateFormatter()
+        df.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        for e in entries {
+            let ts = e["ts"] as? Double ?? 0
+            let t = df.string(from: Date(timeIntervalSince1970: ts))
+            csv += "\(t),\(e["total"] as? String ?? "")\n"
+        }
+        let fm = FileManager.default
+        guard let dl = fm.urls(for: .downloadsDirectory, in: .userDomainMask).first else { return }
+        let url = dl.appendingPathComponent("DeepSeekUsagePanel_history.csv")
+        do {
+            try csv.write(to: url, atomically: true, encoding: .utf8)
+            let alert = NSAlert()
+            alert.messageText = L.isEn ? "Exported" : "已导出"
+            alert.informativeText = url.path
+            alert.alertStyle = .informational
+            alert.addButton(withTitle: L.t("好"))
+            alert.runModal()
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = L.isEn ? "Export failed" : "导出失败"
+            alert.informativeText = error.localizedDescription
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: L.t("好"))
+            alert.runModal()
+        }
     }
 
     @objc private func sourceChanged() {
@@ -1350,11 +1645,11 @@ final class SettingsWindow: NSWindow {
 
     @objc private func clearHistory() {
         let alert = NSAlert()
-        alert.messageText = "清除历史数据？"
-        alert.informativeText = "将删除本地记录的余额历史（看板曲线与累计统计会重新从当前余额开始记录）。"
+        alert.messageText = L.t("清除历史数据？")
+        alert.informativeText = L.t("将删除本地记录的余额历史（看板曲线与累计统计会重新从当前余额开始记录）。")
         alert.alertStyle = .warning
-        alert.addButton(withTitle: "清除")
-        alert.addButton(withTitle: "取消")
+        alert.addButton(withTitle: L.t("清除"))
+        alert.addButton(withTitle: L.t("取消"))
         if alert.runModal() == .alertFirstButtonReturn {
             SharedStore.clearHistory()
         }
@@ -1364,6 +1659,7 @@ final class SettingsWindow: NSWindow {
         let key = keyField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         _ = KeychainStore.set(key, for: "apiKey")
         SharedStore.set("apiKey", key)
+        SharedStore.upsertCurrentAccount(key: key)
         let mode = modePopup.selectedTag()
         let source = sourcePopup.selectedTag()
         var base = baseField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1377,6 +1673,7 @@ final class SettingsWindow: NSWindow {
         SharedStore.set("opacity", opacitySlider.doubleValue)
         SharedStore.set("accent", currentAccent)
         SharedStore.set("appearanceMode", appearancePopup.selectedTag() >= 0 ? appearancePopup.selectedTag() : 0)
+        SharedStore.set("lang", langPopup.selectedTag() == 1 ? "en" : "zh")
         var cards: [Int] = []
         for (i, cb) in dashCardChecks.enumerated() where cb.state == .on { cards.append(i) }
         if cards.isEmpty { cards = [0] }
@@ -1410,7 +1707,7 @@ final class DashboardWindow: NSWindow, WKNavigationDelegate, WKScriptMessageHand
         super.init(contentRect: NSRect(x: 0, y: 0, width: 760, height: 520),
                    styleMask: [.titled, .closable, .resizable],
                    backing: .buffered, defer: false)
-        title = "DeepSeek 用量看板"
+        title = L.t("DeepSeek 用量看板")
         isReleasedWhenClosed = false
         minSize = NSSize(width: 560, height: 380)
         appearance = NSAppearance(named: .darkAqua)
@@ -1457,7 +1754,8 @@ final class DashboardWindow: NSWindow, WKNavigationDelegate, WKScriptMessageHand
         let topped = balance?["topped"] as? String ?? "0"
         let sign = balance?["sign"] as? String ?? "¥"
         let accent = AccentTheme(rawValue: SharedStore.get("accent") as? Int ?? 0)?.hex ?? "#0A84FF"
-        let js = "window.__DS_DATA__ = { sign: \(Self.jsStr(sign)), current: \(Self.jsStr(total)), topped: \(Self.jsStr(topped)), entries: \(entries), accent: \(Self.jsStr(accent)) }; console.log('injected', JSON.stringify(window.__DS_DATA__).slice(0, 300)); renderDashboard();"
+        let lang = L.lang
+        let js = "window.__DS_DATA__ = { sign: \(Self.jsStr(sign)), current: \(Self.jsStr(total)), topped: \(Self.jsStr(topped)), entries: \(entries), accent: \(Self.jsStr(accent)), lang: \(Self.jsStr(lang)) }; console.log('injected', JSON.stringify(window.__DS_DATA__).slice(0, 300)); renderDashboard();"
         webView?.evaluateJavaScript(js, completionHandler: nil)
     }
 
@@ -1487,7 +1785,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     private var panel: FloatingPanel?
     private var dashboard: DashboardWindow?
     private let toggleItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
-    private let launchItem = NSMenuItem(title: "开机自启", action: nil, keyEquivalent: "")
+    private let launchItem = NSMenuItem(title: L.t("开机自启"), action: nil, keyEquivalent: "")
+    private var settingsItem: NSMenuItem?
+    private var dashboardItem: NSMenuItem?
+    private var quitItem: NSMenuItem?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -1510,20 +1811,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     private func setupStatusItem() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         item.button?.image = NSImage(systemSymbolName: "yensign.circle",
-                                     accessibilityDescription: "DeepSeek 用量")
+                                     accessibilityDescription: L.t("DeepSeek 用量"))
         let menu = NSMenu()
         menu.delegate = self
 
-        toggleItem.title = "显示面板"
+        toggleItem.title = L.t("显示面板")
         toggleItem.target = self
         toggleItem.action = #selector(togglePanel)
         menu.addItem(toggleItem)
 
-        let settingsItem = menu.addItem(withTitle: "设置…", action: #selector(openSettings), keyEquivalent: ",")
+        let settingsItem = menu.addItem(withTitle: L.t("设置…"), action: #selector(openSettings), keyEquivalent: ",")
         settingsItem.target = self
+        self.settingsItem = settingsItem
 
-        let dashboardItem = menu.addItem(withTitle: "用量看板…", action: #selector(openDashboard), keyEquivalent: "d")
+        let dashboardItem = menu.addItem(withTitle: L.t("用量看板…"), action: #selector(openDashboard), keyEquivalent: "d")
         dashboardItem.target = self
+        self.dashboardItem = dashboardItem
 
         menu.addItem(.separator())
 
@@ -1533,8 +1836,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
 
         menu.addItem(.separator())
 
-        let quitItem = menu.addItem(withTitle: "退出", action: #selector(quitApp), keyEquivalent: "q")
+        let quitItem = menu.addItem(withTitle: L.t("退出"), action: #selector(quitApp), keyEquivalent: "q")
         quitItem.target = self
+        self.quitItem = quitItem
 
         item.menu = menu
         statusItem = item
@@ -1542,7 +1846,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
 
     func menuNeedsUpdate(_ menu: NSMenu) {
         let visible = panel?.isVisible ?? false
-        toggleItem.title = visible ? "隐藏面板" : "显示面板"
+        toggleItem.title = visible ? L.t("隐藏面板") : L.t("显示面板")
+        launchItem.title = L.t("开机自启")
+        settingsItem?.title = L.t("设置…")
+        dashboardItem?.title = L.t("用量看板…")
+        quitItem?.title = L.t("退出")
         launchItem.state = (SMAppService.mainApp.status == .enabled) ? .on : .off
     }
 
@@ -1592,7 +1900,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         } catch {
             let alert = NSAlert()
             alert.messageText = enable ? "无法开启开机自启" : "无法关闭开机自启"
-            alert.informativeText = "请把应用移到「应用程序」文件夹后重试，或到 系统设置 → 通用 → 登录项 手动调整。\n\(error.localizedDescription)"
+            alert.informativeText = L.t("请把应用移到「应用程序」文件夹后重试，或到 系统设置 → 通用 → 登录项 手动调整。") + "\n" + error.localizedDescription
             alert.runModal()
         }
     }

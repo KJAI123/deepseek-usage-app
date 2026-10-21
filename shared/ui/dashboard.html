@@ -206,12 +206,14 @@ function renderCards(D) {
 
   const now = new Date();
   const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() / 1000;
-  const todayEntries = entries.filter(e => e.ts >= dayStart);
+  // 今日消耗：与悬浮窗一致用"差分求和"（充值不抵消耗），避免今日充值导致首尾差低估
   let todayUsage = 0;
-  if (todayEntries.length >= 2) {
-    const first = parseFloat(todayEntries[0].total) || 0;
-    const last = parseFloat(todayEntries[todayEntries.length - 1].total) || 0;
-    todayUsage = Math.max(0, first - last);
+  for (let i = 1; i < entries.length; i++) {
+    if ((parseFloat(entries[i].ts) || 0) < dayStart) continue;
+    const prev = parseFloat(entries[i - 1].total) || 0;
+    const cur = parseFloat(entries[i].total) || 0;
+    const diff = prev - cur;
+    if (diff > 0.001) todayUsage += diff;
   }
   const cumUsage = usage.reduce((s, u) => s + u.amount, 0);
   // 累计充值：官方充值余额优先（用户实际充值的钱），记录期内充值事件作为补充
@@ -254,7 +256,7 @@ function renderDashboard() {
 
 function drawChart(D, all) {
   const el = document.getElementById("chart");
-  const chart = echarts.init(el);
+  const chart = echarts.getInstanceByDom(el) || echarts.init(el);
   const sign = D.sign || "¥";
   const accent = D.accent || "#63d3c2";
 

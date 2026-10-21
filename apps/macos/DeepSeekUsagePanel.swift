@@ -908,7 +908,11 @@ final class FloatingPanel: NSPanel {
         if total < lowBalanceThreshold {
             guard !(SharedStore.get("lowNotified") as? Bool ?? false) else { return }
             let center = UNUserNotificationCenter.current()
-            center.requestAuthorization(options: [.alert, .sound]) { _, _ in }
+            // 仅首次提醒时请求授权（避免每次刷新都请求）
+            if !(SharedStore.get("notifAuthAsked") as? Bool ?? false) {
+                center.requestAuthorization(options: [.alert, .sound]) { _, _ in }
+                SharedStore.set("notifAuthAsked", true)
+            }
             let content = UNMutableNotificationContent()
             content.title = "DeepSeek 余额不足"
             content.body = "当前余额 \(sign) \(String(format: "%.2f", total))，低于提醒阈值 \(sign) \(String(format: "%.2f", lowBalanceThreshold))"

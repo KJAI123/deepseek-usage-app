@@ -183,6 +183,10 @@ function dayKey(ts) {
   const d = new Date(ts * 1000);
   return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
 }
+function dayZeroTs(k) {
+  const p = k.split("-").map(Number);
+  return new Date(p[0], p[1] - 1, p[2]).getTime() / 1000;
+}
 function usageByDay(usage, maxDays) {
   const agg = {};
   const cutoff = maxDays > 0 ? Date.now() / 1000 - maxDays * 86400 : 0;
@@ -262,7 +266,8 @@ function drawChart(D, all) {
   const byDay = {};
   list.forEach(e => {
     const k = dayKey(e.ts);
-    byDay[k] = { ts: e.ts, total: e.total };
+    // 曲线点固定在"该日 0 点"，避免按最后采样时刻导致跨天时 X 轴日期挤到同一天
+    byDay[k] = { ts: dayZeroTs(k), total: e.total };
   });
   const keys = Object.keys(byDay).sort();
   const balData = keys.map(k => [byDay[k].ts * 1000, parseFloat(byDay[k].total)]);

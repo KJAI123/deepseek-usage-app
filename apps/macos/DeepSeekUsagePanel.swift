@@ -736,7 +736,7 @@ final class FloatingPanel: NSPanel {
         seg.selectedSegment = dashRange == 30 ? 1 : (dashRange == 0 ? 2 : 0)
         seg.segmentStyle = .rounded
         if #available(macOS 11.0, *) { seg.selectedSegmentBezelColor = accentColor }
-        seg.frame = NSRect(x: 196, y: segY, width: 130, height: 22)
+        seg.frame = NSRect(x: 196, y: segY, width: 108, height: 22)
         content.addSubview(seg)
         rangeControl = seg
 
@@ -1301,7 +1301,7 @@ final class SettingsWindow: NSWindow {
         content.addSubview(tabSeg)
 
         // 内容容器（紧凑高度：内容区填满窗口，消除底部大片空白）
-        tabContent.frame = NSRect(x: 10, y: 30, width: 380, height: 300)
+        tabContent.frame = NSRect(x: 10, y: 24, width: 380, height: 300)
         content.addSubview(tabContent)
 
         // 预构建 4 个标签页

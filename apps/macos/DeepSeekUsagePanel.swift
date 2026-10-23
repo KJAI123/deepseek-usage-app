@@ -1301,7 +1301,7 @@ final class SettingsWindow: NSWindow {
         content.addSubview(tabSeg)
 
         // 内容容器（紧凑高度：内容区填满窗口，消除底部大片空白）
-        tabContent.frame = NSRect(x: 10, y: 40, width: 380, height: 300)
+        tabContent.frame = NSRect(x: 10, y: 30, width: 380, height: 300)
         content.addSubview(tabContent)
 
         // 预构建 4 个标签页

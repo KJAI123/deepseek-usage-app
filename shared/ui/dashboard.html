@@ -334,11 +334,12 @@ function drawChart(D, all) {
     tsList.push(d.getTime());
     labels.push((d.getMonth() + 1) + "/" + d.getDate());
   }
-  const balData = tsList.map(ts => {
+  // category 轴：series 数据必须与 labels 对齐的单值数组（null 为无数据天）
+  const balVals = tsList.map(ts => {
     const k = dayKey(ts / 1000);
-    return byDay[k] ? [ts, parseFloat(byDay[k].total)] : [ts, null];
+    return byDay[k] ? parseFloat(byDay[k].total) : null;
   });
-  const useData = tsList.map(ts => useByTs[ts] !== undefined ? [ts, useByTs[ts]] : [ts, null]);
+  const useVals = tsList.map(ts => useByTs[ts] !== undefined ? useByTs[ts] : null);
 
   const tooltipCommon = {
     trigger: "axis",
@@ -374,16 +375,16 @@ function drawChart(D, all) {
       tooltip: Object.assign({}, tooltipCommon, {
         formatter: function (params) {
           const p = params[0];
-          return p.value[0] + "<br/>" + tUseColon + sign + (p.value[1] == null ? "—" : p.value[1].toFixed(2));
+          return p.name + "<br/>" + tUseColon + sign + (p.value == null ? "—" : p.value.toFixed(2));
         }
       }),
       series: [{
         name: tUse,
         type: "bar",
-        data: useData,
+        data: useVals,
         barMaxWidth: 30,
         itemStyle: { color: "#ff9f4a", borderRadius: [4,4,0,0] },
-        label: { show: useData.length <= 14, position: "top", color: "#ff9f4a", fontSize: 10, formatter: p => (p.value[1] == null ? "" : sign + p.value[1].toFixed(2)) }
+        label: { show: useVals.length <= 14, position: "top", color: "#ff9f4a", fontSize: 10, formatter: p => (p.value == null ? "" : sign + p.value.toFixed(2)) }
       }]
     }), true);
   } else if (cfg.mode === "compare") {
@@ -392,9 +393,9 @@ function drawChart(D, all) {
         formatter: function (params) {
           let s = "";
           params.forEach(p => {
-            s += p.value[0] + "<br/>";
-            if (p.seriesName === tBal) s += tBalColon + sign + (p.value[1] == null ? "—" : p.value[1].toFixed(2));
-            else s += tUseColon + sign + (p.value[1] == null ? "—" : p.value[1].toFixed(2));
+            s += p.name + "<br/>";
+            if (p.seriesName === tBal) s += tBalColon + sign + (p.value == null ? "—" : p.value.toFixed(2));
+            else s += tUseColon + sign + (p.value == null ? "—" : p.value.toFixed(2));
             s += "<br/>";
           });
           return s;
@@ -403,8 +404,8 @@ function drawChart(D, all) {
       yAxis: [yCommon, Object.assign({}, yCommon, { splitLine: { show: false } })],
       series: [
         {
-          name: tBal, type: "line", data: balData, smooth: true,
-          symbol: "circle", symbolSize: 6, showSymbol: balData.length <= 40,
+          name: tBal, type: "line", data: balVals, smooth: true,
+          symbol: "circle", symbolSize: 6, showSymbol: balVals.length <= 40,
           yAxisIndex: 0,
           lineStyle: { width: 2.5, color: accent },
           itemStyle: { color: accent, borderColor: "#1b1b20", borderWidth: 1 },
@@ -413,7 +414,7 @@ function drawChart(D, all) {
           ] } }
         },
         {
-          name: tUse, type: "bar", data: useData, yAxisIndex: 1,
+          name: tUse, type: "bar", data: useVals, yAxisIndex: 1,
           barMaxWidth: 22,
           itemStyle: { color: "rgba(255,159,74,0.75)", borderRadius: [4,4,0,0] }
         }
@@ -424,13 +425,13 @@ function drawChart(D, all) {
       tooltip: Object.assign({}, tooltipCommon, {
         formatter: function (params) {
           const p = params[0];
-          return p.value[0] + "<br/>" + tBalColon + sign + (p.value[1] == null ? "—" : p.value[1].toFixed(2));
+          return p.name + "<br/>" + tBalColon + sign + (p.value == null ? "—" : p.value.toFixed(2));
         }
       }),
       series: [{
         name: tBal,
-        type: "line", data: balData, smooth: true,
-        symbol: "circle", symbolSize: 6, showSymbol: balData.length <= 40,
+        type: "line", data: balVals, smooth: true,
+        symbol: "circle", symbolSize: 6, showSymbol: balVals.length <= 40,
         lineStyle: { width: 2.5, color: accent },
         itemStyle: { color: accent, borderColor: "#1b1b20", borderWidth: 1 },
         areaStyle: { color: { type: "linear", x: 0, y: 0, x2: 0, y2: 1, colorStops: [

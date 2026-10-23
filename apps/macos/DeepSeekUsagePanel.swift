@@ -1375,12 +1375,12 @@ final class SettingsWindow: NSWindow {
         v.addSubview(accountPopup)
         let addBtn = NSButton(title: "+", target: self, action: #selector(addAccountAction))
         addBtn.bezelStyle = .rounded
-        addBtn.frame = NSRect(x: r.cx + popW + 8, y: 341, width: 38, height: 24)
+        addBtn.frame = NSRect(x: r.cx + popW + 8, y: 289, width: 38, height: 24)
         addBtn.toolTip = L.t("添加账号")
         v.addSubview(addBtn)
         let delBtn = NSButton(title: "−", target: self, action: #selector(removeAccountAction))
         delBtn.bezelStyle = .rounded
-        delBtn.frame = NSRect(x: r.cx + popW + 8 + 38 + 6, y: 341, width: 38, height: 24)
+        delBtn.frame = NSRect(x: r.cx + popW + 8 + 38 + 6, y: 289, width: 38, height: 24)
         delBtn.toolTip = L.t("删除当前账号")
         v.addSubview(delBtn)
 

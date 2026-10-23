@@ -313,11 +313,32 @@ function drawChart(D, all) {
     // 曲线点固定在"该日 0 点"，避免按最后采样时刻导致跨天时 X 轴日期挤到同一天
     byDay[k] = { ts: dayZeroTs(k), total: e.total };
   });
-  const keys = Object.keys(byDay).sort();
-  const balData = keys.map(k => [byDay[k].ts * 1000, parseFloat(byDay[k].total)]);
   const { usage } = splitUsage(all);
   const useDays = usageByDay(usage, range);
-  const useData = useDays.map(u => [new Date(u.day + "T00:00:00").getTime(), +u.amount.toFixed(2)]);
+  const useByTs = {};
+  useDays.forEach(u => { useByTs[new Date(u.day + "T00:00:00").getTime()] = +u.amount.toFixed(2); });
+
+  // 一天一格：X 轴固定为时间范围内每个自然日，无数据的天补空位（null 断点）
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  let from = todayStart;
+  if (range > 0) {
+    from = new Date(todayStart.getTime() - (range - 1) * 86400000);
+  } else if (list.length > 0) {
+    const earliest = list.reduce((m, e) => Math.min(m, parseFloat(e.ts) || 0), Infinity);
+    from = new Date(dayZeroTs(dayKey(earliest)) * 1000);
+    if (from.getTime() > todayStart.getTime()) from = todayStart;
+  }
+  const tsList = [], labels = [];
+  for (let d = new Date(from); d.getTime() <= todayStart.getTime(); d = new Date(d.getTime() + 86400000)) {
+    tsList.push(d.getTime());
+    labels.push((d.getMonth() + 1) + "/" + d.getDate());
+  }
+  const balData = tsList.map(ts => {
+    const k = dayKey(ts / 1000);
+    return byDay[k] ? [ts, parseFloat(byDay[k].total)] : [ts, null];
+  });
+  const useData = tsList.map(ts => useByTs[ts] !== undefined ? [ts, useByTs[ts]] : [ts, null]);
 
   const tooltipCommon = {
     trigger: "axis",
@@ -326,10 +347,12 @@ function drawChart(D, all) {
     textStyle: { color: "#ececf1", fontSize: 12 }
   };
   const xCommon = {
-    type: "time",
+    type: "category",
+    data: labels,
+    boundaryGap: false,
     axisLine: { lineStyle: { color: "#3a3a42" } },
     axisTick: { show: false },
-    axisLabel: { color: "#9b9ba6", fontSize: 11, formatter: v => { const d = new Date(v); return (d.getMonth()+1) + "/" + d.getDate(); } },
+    axisLabel: { color: "#9b9ba6", fontSize: 11, hideOverlap: true },
     splitLine: { show: false }
   };
   const yCommon = {
@@ -351,8 +374,7 @@ function drawChart(D, all) {
       tooltip: Object.assign({}, tooltipCommon, {
         formatter: function (params) {
           const p = params[0];
-          const d = new Date(p.value[0]);
-          return dayKey(d.getTime() / 1000) + "<br/>" + tUseColon + sign + p.value[1].toFixed(2);
+          return p.value[0] + "<br/>" + tUseColon + sign + (p.value[1] == null ? "—" : p.value[1].toFixed(2));
         }
       }),
       series: [{
@@ -361,7 +383,7 @@ function drawChart(D, all) {
         data: useData,
         barMaxWidth: 30,
         itemStyle: { color: "#ff9f4a", borderRadius: [4,4,0,0] },
-        label: { show: useData.length <= 14, position: "top", color: "#ff9f4a", fontSize: 10, formatter: p => sign + p.value[1].toFixed(2) }
+        label: { show: useData.length <= 14, position: "top", color: "#ff9f4a", fontSize: 10, formatter: p => (p.value[1] == null ? "" : sign + p.value[1].toFixed(2)) }
       }]
     }), true);
   } else if (cfg.mode === "compare") {
@@ -370,10 +392,9 @@ function drawChart(D, all) {
         formatter: function (params) {
           let s = "";
           params.forEach(p => {
-            const d = new Date(p.value[0]);
-            s += dayKey(d.getTime() / 1000) + "<br/>";
-            if (p.seriesName === tBal) s += tBalColon + sign + p.value[1].toFixed(2);
-            else s += tUseColon + sign + p.value[1].toFixed(2);
+            s += p.value[0] + "<br/>";
+            if (p.seriesName === tBal) s += tBalColon + sign + (p.value[1] == null ? "—" : p.value[1].toFixed(2));
+            else s += tUseColon + sign + (p.value[1] == null ? "—" : p.value[1].toFixed(2));
             s += "<br/>";
           });
           return s;
@@ -403,8 +424,7 @@ function drawChart(D, all) {
       tooltip: Object.assign({}, tooltipCommon, {
         formatter: function (params) {
           const p = params[0];
-          const d = new Date(p.value[0]);
-          return dayKey(d.getTime() / 1000) + "<br/>" + tBalColon + sign + p.value[1].toFixed(2);
+          return p.value[0] + "<br/>" + tBalColon + sign + (p.value[1] == null ? "—" : p.value[1].toFixed(2));
         }
       }),
       series: [{

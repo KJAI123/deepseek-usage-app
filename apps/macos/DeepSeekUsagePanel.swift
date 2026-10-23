@@ -284,6 +284,7 @@ enum L {
         "7天": "7D",
         "30天": "30D",
         "显示曲线图": "Show Chart",
+        "看板窗口置顶": "Dashboard on Top",
         "余额低于阈值时发送系统通知": "Notify when balance below threshold",
         "提醒阈值（元）": "Threshold (¥)",
         "清除历史数据…": "Clear History…",
@@ -1250,6 +1251,7 @@ final class SettingsWindow: NSWindow {
     }
     private let dashRangePopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let chartCheck = NSButton(checkboxWithTitle: L.t("显示曲线图"), target: nil, action: nil)
+    private let dashTopCheck = NSButton(checkboxWithTitle: L.t("看板窗口置顶"), target: nil, action: nil)
     // 提醒
     private let lowCheck = NSButton(checkboxWithTitle: L.t("余额低于阈值时发送系统通知"), target: nil, action: nil)
     private let thresholdField = NSTextField(frame: .zero)
@@ -1261,7 +1263,7 @@ final class SettingsWindow: NSWindow {
     init(displayMode: Int, sourceType: Int, baseURL: String, apiKey: String, interval: Int,
          alwaysOnTop: Bool, opacity: Double, accent: Int, appearanceMode: Int,
          dashCards: [Int], dashRange: Int, showChart: Bool, lowAlert: Bool, lowThreshold: Double) {
-        super.init(contentRect: NSRect(x: 0, y: 0, width: 400, height: 454),
+        super.init(contentRect: NSRect(x: 0, y: 0, width: 400, height: 402),
                    styleMask: [.titled, .closable], backing: .buffered, defer: false)
         title = L.t("DeepSeek 用量面板 · 设置")
         isReleasedWhenClosed = false
@@ -1295,11 +1297,11 @@ final class SettingsWindow: NSWindow {
                                     trackingMode: .selectOne, target: self, action: #selector(tabChanged))
         tabSeg.selectedSegment = 0
         tabSeg.segmentStyle = .rounded
-        tabSeg.frame = NSRect(x: 10, y: 398, width: 380, height: 30)
+        tabSeg.frame = NSRect(x: 10, y: 346, width: 380, height: 30)
         content.addSubview(tabSeg)
 
-        // 内容容器
-        tabContent.frame = NSRect(x: 10, y: 40, width: 380, height: 352)
+        // 内容容器（紧凑高度：内容区填满窗口，消除底部大片空白）
+        tabContent.frame = NSRect(x: 10, y: 40, width: 380, height: 300)
         content.addSubview(tabContent)
 
         // 预构建 4 个标签页
@@ -1349,13 +1351,13 @@ final class SettingsWindow: NSWindow {
 
     // MARK: 基础
     private func buildBasicTab(displayMode: Int, sourceType: Int, baseURL: String, apiKey: String, interval: Int) -> NSView {
-        let v = NSView(frame: NSRect(x: 0, y: 0, width: 380, height: 372))
+        let v = NSView(frame: NSRect(x: 0, y: 0, width: 380, height: 300))
         let r = rowWidths([L.t("当前账号"), L.t("API Key"), L.t("显示模式"), L.t("数据源"), L.t("网关地址"), L.t("自动刷新间隔")])
 
         // 账号管理（多账号切换）
-        v.addSubview(label(L.t("当前账号"), NSRect(x: 20, y: 344, width: r.labelW, height: 20)))
+        v.addSubview(label(L.t("当前账号"), NSRect(x: 20, y: 296, width: r.labelW, height: 20)))
         let popW = max(120, r.cw - 96)  // 右侧给 +/− 按钮留 38+6+38+14
-        accountPopup.frame = NSRect(x: r.cx, y: 340, width: popW, height: 26)
+        accountPopup.frame = NSRect(x: r.cx, y: 292, width: popW, height: 26)
         accountPopup.removeAllItems()
         let accs = SharedStore.accounts()
         if accs.isEmpty {
@@ -1382,19 +1384,19 @@ final class SettingsWindow: NSWindow {
         delBtn.toolTip = L.t("删除当前账号")
         v.addSubview(delBtn)
 
-        v.addSubview(label(L.t("API Key"), NSRect(x: 20, y: 300, width: r.labelW, height: 20)))
+        v.addSubview(label(L.t("API Key"), NSRect(x: 20, y: 244, width: r.labelW, height: 20)))
         keyField.stringValue = apiKey
         keyField.placeholderString = "sk-…"
         keyField.font = .systemFont(ofSize: 12)
-        keyField.frame = NSRect(x: r.cx, y: 296, width: r.cw - 62, height: 24)
+        keyField.frame = NSRect(x: r.cx, y: 240, width: r.cw - 62, height: 24)
         v.addSubview(keyField)
         showKey.target = self
         showKey.action = #selector(toggleKeyVisible)
-        showKey.frame = NSRect(x: r.cx + r.cw - 62, y: 298, width: 58, height: 20)
+        showKey.frame = NSRect(x: r.cx + r.cw - 62, y: 242, width: 58, height: 20)
         v.addSubview(showKey)
 
-        v.addSubview(label(L.t("显示模式"), NSRect(x: 20, y: 256, width: r.labelW, height: 20)))
-        modePopup.frame = NSRect(x: r.cx, y: 252, width: r.cw, height: 26)
+        v.addSubview(label(L.t("显示模式"), NSRect(x: 20, y: 192, width: r.labelW, height: 20)))
+        modePopup.frame = NSRect(x: r.cx, y: 188, width: r.cw, height: 26)
         modePopup.removeAllItems()
         modePopup.addItem(withTitle: L.t("极简 · 只显示总余额"))
         modePopup.lastItem?.tag = 0
@@ -1406,8 +1408,8 @@ final class SettingsWindow: NSWindow {
         if modePopup.selectedTag() == -1 { modePopup.selectItem(withTag: 0) }
         v.addSubview(modePopup)
 
-        v.addSubview(label(L.t("数据源"), NSRect(x: 20, y: 212, width: r.labelW, height: 20)))
-        sourcePopup.frame = NSRect(x: r.cx, y: 208, width: r.cw, height: 26)
+        v.addSubview(label(L.t("数据源"), NSRect(x: 20, y: 140, width: r.labelW, height: 20)))
+        sourcePopup.frame = NSRect(x: r.cx, y: 136, width: r.cw, height: 26)
         sourcePopup.removeAllItems()
         sourcePopup.addItem(withTitle: L.t("DeepSeek 官方 API"))
         sourcePopup.lastItem?.tag = 0
@@ -1419,16 +1421,16 @@ final class SettingsWindow: NSWindow {
         sourcePopup.action = #selector(sourceChanged)
         v.addSubview(sourcePopup)
 
-        v.addSubview(label(L.t("网关地址"), NSRect(x: 20, y: 168, width: r.labelW, height: 20)))
+        v.addSubview(label(L.t("网关地址"), NSRect(x: 20, y: 88, width: r.labelW, height: 20)))
         baseField.stringValue = baseURL
         baseField.placeholderString = L.isEn ? "https://your-gateway.com (optional /v1)" : "https://your-gateway.com（可选 /v1）"
         baseField.font = .systemFont(ofSize: 12)
-        baseField.frame = NSRect(x: r.cx, y: 164, width: r.cw, height: 24)
+        baseField.frame = NSRect(x: r.cx, y: 84, width: r.cw, height: 24)
         baseField.isEnabled = (sourcePopup.selectedTag() == 1)
         v.addSubview(baseField)
 
-        v.addSubview(label(L.t("自动刷新间隔"), NSRect(x: 20, y: 124, width: r.labelW, height: 20)))
-        intervalPopup.frame = NSRect(x: r.cx, y: 120, width: min(r.cw, 150), height: 26)
+        v.addSubview(label(L.t("自动刷新间隔"), NSRect(x: 20, y: 36, width: r.labelW, height: 20)))
+        intervalPopup.frame = NSRect(x: r.cx, y: 32, width: min(r.cw, 150), height: 26)
         intervalPopup.removeAllItems()
         for iv in intervals {
             intervalPopup.addItem(withTitle: "\(iv) " + L.t("秒"))
@@ -1442,10 +1444,10 @@ final class SettingsWindow: NSWindow {
 
     // MARK: 外观
     private func buildAppearanceTab(alwaysOnTop: Bool, opacity: Double, accent: Int, appearanceMode: Int) -> NSView {
-        let v = NSView(frame: NSRect(x: 0, y: 0, width: 380, height: 372))
+        let v = NSView(frame: NSRect(x: 0, y: 0, width: 380, height: 300))
         let r = rowWidths([L.t("主题色"), L.t("面板透明度"), L.t("外观"), L.t("语言"), L.t("窗口置顶")])
 
-        v.addSubview(label(L.t("主题色"), NSRect(x: 20, y: 308, width: r.labelW, height: 20)))
+        v.addSubview(label(L.t("主题色"), NSRect(x: 20, y: 296, width: r.labelW, height: 20)))
         currentAccent = accent
         for (i, t) in AccentTheme.allCases.enumerated() {
             let x = r.cx + CGFloat(i) * 30
@@ -1456,28 +1458,28 @@ final class SettingsWindow: NSWindow {
             b.layer?.backgroundColor = t.color.cgColor
             b.layer?.cornerRadius = 10
             b.layer?.masksToBounds = true
-            b.frame = NSRect(x: x, y: 304, width: 20, height: 20)
+            b.frame = NSRect(x: x, y: 292, width: 20, height: 20)
             b.toolTip = L.t(t.name)
             v.addSubview(b)
             accentButtons.append(b)
         }
         updateAccentSelection()
 
-        v.addSubview(label(L.t("面板透明度"), NSRect(x: 20, y: 266, width: r.labelW, height: 20)))
+        v.addSubview(label(L.t("面板透明度"), NSRect(x: 20, y: 244, width: r.labelW, height: 20)))
         opacitySlider.doubleValue = max(0.5, min(1.0, opacity))
         opacitySlider.isContinuous = true
         opacitySlider.target = self
         opacitySlider.action = #selector(opacityChanged)
-        opacitySlider.frame = NSRect(x: r.cx, y: 264, width: r.cw - 56, height: 20)
+        opacitySlider.frame = NSRect(x: r.cx, y: 242, width: r.cw - 56, height: 20)
         v.addSubview(opacitySlider)
         opacityValue.font = .systemFont(ofSize: 12)
         opacityValue.textColor = .secondaryLabelColor
-        opacityValue.frame = NSRect(x: r.cx + r.cw - 56 + 6, y: 266, width: 50, height: 20)
+        opacityValue.frame = NSRect(x: r.cx + r.cw - 56 + 6, y: 244, width: 50, height: 20)
         opacityValue.stringValue = "\(Int(round(opacity * 100)))%"
         v.addSubview(opacityValue)
 
-        v.addSubview(label(L.t("外观"), NSRect(x: 20, y: 224, width: r.labelW, height: 20)))
-        appearancePopup.frame = NSRect(x: r.cx, y: 220, width: min(r.cw, 170), height: 26)
+        v.addSubview(label(L.t("外观"), NSRect(x: 20, y: 192, width: r.labelW, height: 20)))
+        appearancePopup.frame = NSRect(x: r.cx, y: 188, width: min(r.cw, 170), height: 26)
         appearancePopup.removeAllItems()
         appearancePopup.addItem(withTitle: L.t("跟随系统"))
         appearancePopup.lastItem?.tag = 0
@@ -1489,8 +1491,8 @@ final class SettingsWindow: NSWindow {
         if appearancePopup.selectedTag() == -1 { appearancePopup.selectItem(withTag: 0) }
         v.addSubview(appearancePopup)
 
-        v.addSubview(label(L.t("语言"), NSRect(x: 20, y: 182, width: r.labelW, height: 20)))
-        langPopup.frame = NSRect(x: r.cx, y: 178, width: min(r.cw, 170), height: 26)
+        v.addSubview(label(L.t("语言"), NSRect(x: 20, y: 140, width: r.labelW, height: 20)))
+        langPopup.frame = NSRect(x: r.cx, y: 136, width: min(r.cw, 170), height: 26)
         langPopup.removeAllItems()
         langPopup.addItem(withTitle: "中文")
         langPopup.lastItem?.tag = 0
@@ -1499,26 +1501,26 @@ final class SettingsWindow: NSWindow {
         langPopup.selectItem(withTag: L.isEn ? 1 : 0)
         v.addSubview(langPopup)
 
-        v.addSubview(label(L.t("窗口置顶"), NSRect(x: 20, y: 140, width: r.labelW, height: 20)))
+        v.addSubview(label(L.t("窗口置顶"), NSRect(x: 20, y: 88, width: r.labelW, height: 20)))
         topCheck.state = alwaysOnTop ? .on : .off
-        topCheck.frame = NSRect(x: r.cx, y: 138, width: r.cw, height: 20)
+        topCheck.frame = NSRect(x: r.cx, y: 86, width: r.cw, height: 20)
         v.addSubview(topCheck)
         return v
     }
 
     // MARK: 看板
     private func buildDashboardTab(dashCards: [Int], dashRange: Int, showChart: Bool) -> NSView {
-        let v = NSView(frame: NSRect(x: 0, y: 0, width: 380, height: 372))
-        let r = rowWidths([L.t("悬浮窗看板显示卡片"), L.t("默认时间范围")])
-        v.addSubview(label(L.t("悬浮窗看板显示卡片"), NSRect(x: 20, y: 308, width: r.labelW, height: 20)))
+        let v = NSView(frame: NSRect(x: 0, y: 0, width: 380, height: 300))
+        let r = rowWidths([L.t("悬浮窗看板显示卡片"), L.t("默认时间范围"), L.t("显示曲线图"), L.t("看板窗口置顶")])
+        v.addSubview(label(L.t("悬浮窗看板显示卡片"), NSRect(x: 20, y: 296, width: r.labelW, height: 20)))
         let cw = max(110, (380 - r.cx - 14 - 6) / 2)  // 两列 checkbox 均分
         for (i, cb) in dashCardChecks.enumerated() {
             cb.state = dashCards.contains(i) ? .on : .off
-            cb.frame = NSRect(x: r.cx + CGFloat(i / 3) * (cw + 6), y: 280 - CGFloat(i % 3) * 34, width: cw, height: 22)
+            cb.frame = NSRect(x: r.cx + CGFloat(i / 3) * (cw + 6), y: 264 - CGFloat(i % 3) * 30, width: cw, height: 22)
             v.addSubview(cb)
         }
-        v.addSubview(label(L.t("默认时间范围"), NSRect(x: 20, y: 172, width: r.labelW, height: 20)))
-        dashRangePopup.frame = NSRect(x: r.cx, y: 168, width: min(r.cw, 150), height: 26)
+        v.addSubview(label(L.t("默认时间范围"), NSRect(x: 20, y: 170, width: r.labelW, height: 20)))
+        dashRangePopup.frame = NSRect(x: r.cx, y: 166, width: min(r.cw, 150), height: 26)
         dashRangePopup.removeAllItems()
         dashRangePopup.addItem(withTitle: L.t("近 7 天"))
         dashRangePopup.lastItem?.tag = 7
@@ -1531,33 +1533,37 @@ final class SettingsWindow: NSWindow {
         v.addSubview(dashRangePopup)
 
         chartCheck.state = showChart ? .on : .off
-        chartCheck.frame = NSRect(x: 20, y: 128, width: 200, height: 22)
+        chartCheck.frame = NSRect(x: 20, y: 120, width: 200, height: 22)
         v.addSubview(chartCheck)
+
+        dashTopCheck.state = (SharedStore.get("dashTop") as? Bool ?? true) ? .on : .off
+        dashTopCheck.frame = NSRect(x: 20, y: 66, width: 240, height: 22)
+        v.addSubview(dashTopCheck)
         return v
     }
 
     // MARK: 提醒
     private func buildAlertTab(lowAlert: Bool, lowThreshold: Double) -> NSView {
-        let v = NSView(frame: NSRect(x: 0, y: 0, width: 380, height: 372))
+        let v = NSView(frame: NSRect(x: 0, y: 0, width: 380, height: 300))
         lowCheck.state = lowAlert ? .on : .off
-        lowCheck.frame = NSRect(x: 20, y: 300, width: 360, height: 22)
+        lowCheck.frame = NSRect(x: 20, y: 296, width: 360, height: 22)
         v.addSubview(lowCheck)
 
         let rt = rowWidths([L.t("提醒阈值（元）")])
-        v.addSubview(label(L.t("提醒阈值（元）"), NSRect(x: 20, y: 250, width: rt.labelW, height: 20)))
+        v.addSubview(label(L.t("提醒阈值（元）"), NSRect(x: 20, y: 244, width: rt.labelW, height: 20)))
         thresholdField.stringValue = String(format: "%.0f", lowThreshold)
         thresholdField.font = .systemFont(ofSize: 12)
-        thresholdField.frame = NSRect(x: rt.cx, y: 246, width: 80, height: 24)
+        thresholdField.frame = NSRect(x: rt.cx, y: 240, width: 80, height: 24)
         v.addSubview(thresholdField)
 
         let clearButton = NSButton(title: L.t("清除历史数据…"), target: self, action: #selector(clearHistory))
         clearButton.bezelStyle = .rounded
-        clearButton.frame = NSRect(x: 20, y: 200, width: 150, height: 30)
+        clearButton.frame = NSRect(x: 20, y: 192, width: 150, height: 30)
         v.addSubview(clearButton)
 
         let exportButton = NSButton(title: L.t("导出历史数据…"), target: self, action: #selector(exportCSV))
         exportButton.bezelStyle = .rounded
-        exportButton.frame = NSRect(x: 20, y: 150, width: 150, height: 30)
+        exportButton.frame = NSRect(x: 20, y: 140, width: 150, height: 30)
         v.addSubview(exportButton)
         return v
     }
@@ -1695,6 +1701,7 @@ final class SettingsWindow: NSWindow {
         SharedStore.set("dashCards", cards)
         SharedStore.set("dashRange", dashRangePopup.selectedTag() >= 0 ? dashRangePopup.selectedTag() : 7)
         SharedStore.set("showChart", chartCheck.state == .on)
+        SharedStore.set("dashTop", dashTopCheck.state == .on)
         SharedStore.set("lowBalanceAlert", lowCheck.state == .on)
         let thr = Double(thresholdField.stringValue) ?? 10.0
         SharedStore.set("lowBalanceThreshold", max(0.5, thr))
@@ -1726,6 +1733,7 @@ final class DashboardWindow: NSWindow, WKNavigationDelegate, WKScriptMessageHand
         isReleasedWhenClosed = false
         minSize = NSSize(width: 560, height: 380)
         appearance = NSAppearance(named: .darkAqua)
+        applyTopLevel()
         let config = WKWebViewConfiguration()
         let controller = WKUserContentController()
         controller.add(self, name: "log")
@@ -1745,6 +1753,15 @@ final class DashboardWindow: NSWindow, WKNavigationDelegate, WKScriptMessageHand
         webView?.removeFromSuperview()
         webView = nil
         loaded = false
+    }
+
+    /// 看板窗口"显示在最顶部"：设置·看板 tab 的「看板窗口置顶」控制
+    func applyTopLevel() {
+        let on = SharedStore.get("dashTop") as? Bool ?? true
+        level = on ? .floating : .normal
+        collectionBehavior = on
+            ? [.canJoinAllSpaces, .fullScreenAuxiliary]
+            : [.managed]
     }
 
     func loadDashboard() {
@@ -1830,6 +1847,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         let menu = NSMenu()
         menu.delegate = self
 
+        // 用量看板… 放第一位（用户高频入口）
+        let dashboardItem = menu.addItem(withTitle: L.t("用量看板…"), action: #selector(openDashboard), keyEquivalent: "d")
+        dashboardItem.target = self
+        self.dashboardItem = dashboardItem
+
         toggleItem.title = L.t("显示面板")
         toggleItem.target = self
         toggleItem.action = #selector(togglePanel)
@@ -1838,10 +1860,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         let settingsItem = menu.addItem(withTitle: L.t("设置…"), action: #selector(openSettings), keyEquivalent: ",")
         settingsItem.target = self
         self.settingsItem = settingsItem
-
-        let dashboardItem = menu.addItem(withTitle: L.t("用量看板…"), action: #selector(openDashboard), keyEquivalent: "d")
-        dashboardItem.target = self
-        self.dashboardItem = dashboardItem
 
         menu.addItem(.separator())
 
@@ -1887,6 +1905,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         }
         dashboard?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+        dashboard?.applyTopLevel()
         dashboard?.refreshData()
         // 页面未加载完成时 evaluateJavaScript 会静默失败，延迟补发注入
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in

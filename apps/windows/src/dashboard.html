@@ -68,19 +68,34 @@ if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandl
 }
 
 // 数据获取：macOS 端由宿主注入 window.__DS_DATA__；Tauri/Web 端通过 invoke 拉取
+const USD_RATE = 7.2; // 1 USD = 7.2 CNY
+function moneySpec(cur, mode) {
+  const c = (cur || "CNY").toUpperCase();
+  switch (mode) {
+    case 1: return { sign: "¥", rate: 1 };
+    case 2: return { sign: "$", rate: 1 / USD_RATE };
+    default:
+      if (c === "USD" || c === "US") return { sign: "$", rate: 1 };
+      if (c === "EUR") return { sign: "€", rate: 1 };
+      return { sign: "¥", rate: 1 };
+  }
+}
 function fetchData(cb) {
   if (window.__DS_DATA__) { cb(window.__DS_DATA__); return; }
   if (window.__TAURI__ && window.__TAURI__.core) {
     Promise.all([
       window.__TAURI__.core.invoke("get_balance_cached"),
-      window.__TAURI__.core.invoke("get_history")
+      window.__TAURI__.core.invoke("get_history"),
+      window.__TAURI__.core.invoke("get_config")
     ]).then(function (res) {
       const b = res[0] || {};
-      cb({ sign: "¥", current: b.total || "", entries: res[1] || [] });
-    }).catch(function () { cb({ sign: "¥", current: "", entries: [] }); });
+      const cfg = res[2] || {};
+      const spec = moneySpec(b.currency, cfg.display_currency === undefined ? 0 : cfg.display_currency);
+      cb({ sign: spec.sign, rate: spec.rate, current: b.total || "", entries: res[1] || [] });
+    }).catch(function () { cb({ sign: "¥", rate: 1, current: "", entries: [] }); });
     return;
   }
-  cb({ sign: "¥", current: "", entries: [] });
+  cb({ sign: "¥", rate: 1, current: "", entries: [] });
 }
 
 function boot() {
@@ -91,10 +106,13 @@ function boot() {
 }
 
 function renderDashboard() {
-  const D = window.__DS_DATA__ || { sign: "¥", current: "", entries: [] };
-  const entries = (D.entries || []).slice();
+  const D = window.__DS_DATA__ || { sign: "¥", rate: 1, current: "", entries: [] };
+  const entries = (D.entries || []).slice().map(function (e) {
+    return { ts: e.ts, total: (parseFloat(e.total) || 0) * D.rate };
+  });
+  const cur = (parseFloat(D.current) || 0) * D.rate;
 
-  document.getElementById("cur").textContent = (D.current ? D.sign + D.current : "—");
+  document.getElementById("cur").textContent = (D.current ? D.sign + cur.toFixed(2) : "—");
 
   // 今日消耗 = 今天首条余额 - 今天最新余额
   const now = new Date();

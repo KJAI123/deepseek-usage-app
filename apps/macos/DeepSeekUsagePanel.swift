@@ -85,11 +85,13 @@ enum SharedStore {
         write("config.json", d)
     }
 
-    /// 写余额缓存（供小组件读取）
-    static func writeBalance(_ b: AccountBalance, sign: String) {
+    /// 写余额缓存（供小组件读取）；rate 为显示货币换算系数（CNY=1.0，USD≈1/7.2）
+    static func writeBalance(_ b: AccountBalance, sign: String, rate: Double = 1.0) {
         let payload: [String: Any] = [
             "total": b.total,
             "sign": sign,
+            "rate": rate,
+            "currency": b.currency,
             "granted": b.granted ?? "0",
             "topped": b.toppedUp ?? "0",
             "available": b.isAvailable,
@@ -273,6 +275,10 @@ enum L {
         "中文": "中文",
         "English": "English",
         "窗口置顶": "Always on Top",
+        "显示货币": "Currency",
+        "自动跟随": "Auto",
+        "人民币 CNY": "CNY ¥",
+        "美元 USD": "USD $",
         "窗口始终置顶": "Always on Top",
         "置顶": "Pin",
         "取消置顶": "Unpin",
@@ -801,9 +807,10 @@ final class FloatingPanel: NSPanel {
         let balance = SharedStore.readBalance()
         let total = balance?["total"] as? String ?? "—"
         let sign = balance?["sign"] as? String ?? "¥"
-        dashboardValues["当前余额"]?.stringValue = "\(sign) \(total)"
+        let rate = balance?["rate"] as? Double ?? 1.0
+        dashboardValues["当前余额"]?.stringValue = fmtMoney(Double(total) ?? 0, sign: sign, rate: rate)
 
-        // 今日消耗 / 累计消耗 / 累计充值（余额差推导）
+        // 今日消耗 / 累计消耗 / 累计充值（余额差推导，原始 CNY 差值按显示货币换算）
         var todayUsage = 0.0, cumUsage = 0.0, topup = 0.0
         if entries.count >= 2 {
             let dayStart = Calendar.current.startOfDay(for: Date()).timeIntervalSince1970
@@ -819,13 +826,13 @@ final class FloatingPanel: NSPanel {
                 }
             }
         }
-        dashboardValues["今日消耗"]?.stringValue = todayUsage > 0.001 ? "\(sign) \(String(format: "%.2f", todayUsage))" : "0.00"
-        dashboardValues["累计消耗"]?.stringValue = cumUsage > 0.001 ? "\(sign) \(String(format: "%.2f", cumUsage))" : "0.00"
+        dashboardValues["今日消耗"]?.stringValue = todayUsage > 0.001 ? fmtMoney(todayUsage, sign: sign, rate: rate) : fmtMoney(0, sign: sign, rate: rate)
+        dashboardValues["累计消耗"]?.stringValue = cumUsage > 0.001 ? fmtMoney(cumUsage, sign: sign, rate: rate) : fmtMoney(0, sign: sign, rate: rate)
         // 累计充值：优先取官方充值余额（topped_up_balance，用户实际充值的钱），
         // 记录期内检测到的充值事件作为补充（API 快照已含记录期充值，故取较大值）
         let topped = Double(balance?["topped"] as? String ?? "0") ?? 0
         let cumTopup = max(topup, topped)
-        dashboardValues["累计充值"]?.stringValue = cumTopup > 0.001 ? "\(sign) \(String(format: "%.2f", cumTopup))" : "0.00"
+        dashboardValues["累计充值"]?.stringValue = cumTopup > 0.001 ? fmtMoney(cumTopup, sign: sign, rate: rate) : fmtMoney(0, sign: sign, rate: rate)
 
         // 记录天数：实际有记录的自然日数（与看板一致）
         let daySet = Set(entries.compactMap { e -> Int? in
@@ -835,7 +842,7 @@ final class FloatingPanel: NSPanel {
         let days = daySet.count
         dashboardValues["记录天数"]?.stringValue = days > 0 ? "\(days) " + L.t("天") : "—"
         let maxV = entries.reduce(0.0) { max($0, Double($1["total"] as? String ?? "0") ?? 0) }
-        dashboardValues["区间最高"]?.stringValue = maxV > 0 ? "\(sign) \(String(format: "%.2f", maxV))" : "—"
+        dashboardValues["区间最高"]?.stringValue = maxV > 0 ? fmtMoney(maxV, sign: sign, rate: rate) : "—"
 
         // 迷你曲线（按范围过滤）
         let cutoff = dashRange > 0 ? Date().timeIntervalSince1970 - Double(dashRange) * 86400 : 0
@@ -1020,8 +1027,8 @@ final class FloatingPanel: NSPanel {
                 DispatchQueue.main.async {
                     guard let self = self else { return }
                     if case .success(let b) = result {
-                        let sign = Self.currencySign(b.currency)
-                        SharedStore.writeBalance(b, sign: sign)
+                        let spec = self.moneySpec(for: b)
+                        SharedStore.writeBalance(b, sign: spec.sign, rate: spec.rate)
                         SharedStore.appendHistory(total: b.total)
                     }
                     self.updateDashboardUI()
@@ -1058,14 +1065,16 @@ final class FloatingPanel: NSPanel {
     }
 
     private func apply(_ b: AccountBalance) {
-        let sign = Self.currencySign(b.currency)
-        totalValue.stringValue = "\(sign) \(b.total)"
-        // 极简模式下赠送/充值控件不存在，用可选链避免崩溃
-        if let g = b.granted { grantedValue?.stringValue = "\(sign) \(g)" }
-        if let t = b.toppedUp { toppedValue?.stringValue = "\(sign) \(t)" }
-
+        let spec = moneySpec(for: b)
+        let sign = spec.sign, rate = spec.rate
         let total = Double(b.total) ?? 0
-        totalValue.textColor = total < 5 ? .systemRed : (total < 20 ? .systemOrange : accentColor)
+        totalValue.stringValue = fmtMoney(total, sign: sign, rate: rate)
+        // 极简模式下赠送/充值控件不存在，用可选链避免崩溃
+        if let g = b.granted { grantedValue?.stringValue = fmtMoney(Double(g) ?? 0, sign: sign, rate: rate) }
+        if let t = b.toppedUp { toppedValue?.stringValue = fmtMoney(Double(t) ?? 0, sign: sign, rate: rate) }
+
+        let shown = total * rate
+        totalValue.textColor = shown < 5 ? .systemRed : (shown < 20 ? .systemOrange : accentColor)
         grantedValue?.textColor = .secondaryLabelColor
         toppedValue?.textColor = .secondaryLabelColor
 
@@ -1077,7 +1086,7 @@ final class FloatingPanel: NSPanel {
             statusLabel.stringValue = L.t("余额不足")
         }
         lastUpdated = Self.timeFormatter.string(from: Date())
-        SharedStore.writeBalance(b, sign: sign)
+        SharedStore.writeBalance(b, sign: sign, rate: rate)
         SharedStore.appendHistory(total: b.total)
         checkLowBalance(total: total, sign: sign)
         updateFooter()
@@ -1125,6 +1134,30 @@ final class FloatingPanel: NSPanel {
         }
     }
 
+    /// 显示货币模式：0=自动跟随 API，1=强制人民币，2=强制美元（按汇率换算显示）
+    private var displayCurrencyMode: Int { SharedStore.get("displayCurrency") as? Int ?? 0 }
+    /// USD 显示换算汇率（1 USD = 7.2 CNY，可在代码中调整）
+    private static let usdRate: Double = 7.2
+
+    /// 解析当前显示货币 → (符号, 换算系数)；CNY=1.0，USD≈0.1389（即 /7.2）
+    private func moneySpec(for b: AccountBalance) -> (sign: String, rate: Double) {
+        switch displayCurrencyMode {
+        case 1: return ("¥", 1.0)
+        case 2: return ("$", 1.0 / Self.usdRate)
+        default:
+            switch b.currency.uppercased() {
+            case "USD", "US": return ("$", 1.0)
+            case "EUR": return ("€", 1.0)
+            default: return ("¥", 1.0)   // CNY / CN / 其他按人民币
+            }
+        }
+    }
+
+    /// 按显示货币格式化金额（内部以 CNY 计，rate 换算）
+    private func fmtMoney(_ v: Double, sign: String, rate: Double) -> String {
+        "\(sign) \(String(format: "%.2f", v * rate))"
+    }
+
     // MARK: - 设置
     @objc func openSettings() {
         let sheet = SettingsWindow(displayMode: displayMode,
@@ -1140,7 +1173,8 @@ final class FloatingPanel: NSPanel {
                                    dashRange: SharedStore.get("dashRange") as? Int ?? 7,
                                    showChart: SharedStore.get("showChart") as? Bool ?? true,
                                    lowAlert: SharedStore.get("lowBalanceAlert") as? Bool ?? false,
-                                   lowThreshold: SharedStore.get("lowBalanceThreshold") as? Double ?? 10.0)
+                                   lowThreshold: SharedStore.get("lowBalanceThreshold") as? Double ?? 10.0,
+                                   displayCurrency: SharedStore.get("displayCurrency") as? Int ?? 0)
         sheet.onSave = { [weak self] in
             guard let self = self else { return }
             self.interval = SharedStore.get("refreshInterval") as? Int ?? 60
@@ -1244,6 +1278,7 @@ final class SettingsWindow: NSWindow {
     private let topCheck = NSButton(checkboxWithTitle: L.t("窗口始终置顶"), target: nil, action: nil)
     private let appearancePopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let langPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let currencyPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let opacitySlider = NSSlider(value: 1.0, minValue: 0.5, maxValue: 1.0, target: nil, action: nil)
     private let opacityValue = NSTextField(labelWithString: "100%")
     private var accentButtons: [NSButton] = []
@@ -1267,7 +1302,8 @@ final class SettingsWindow: NSWindow {
 
     init(displayMode: Int, sourceType: Int, baseURL: String, apiKey: String, interval: Int,
          alwaysOnTop: Bool, opacity: Double, accent: Int, appearanceMode: Int,
-         dashCards: [Int], dashRange: Int, showChart: Bool, lowAlert: Bool, lowThreshold: Double) {
+         dashCards: [Int], dashRange: Int, showChart: Bool, lowAlert: Bool, lowThreshold: Double,
+         displayCurrency: Int) {
         super.init(contentRect: NSRect(x: 0, y: 0, width: 400, height: 402),
                    styleMask: [.titled, .closable], backing: .buffered, defer: false)
         title = L.t("DeepSeek 用量面板 · 设置")
@@ -1276,7 +1312,8 @@ final class SettingsWindow: NSWindow {
                 apiKey: apiKey, interval: interval, alwaysOnTop: alwaysOnTop,
                 opacity: opacity, accent: accent, appearanceMode: appearanceMode,
                 dashCards: dashCards, dashRange: dashRange, showChart: showChart,
-                lowAlert: lowAlert, lowThreshold: lowThreshold)
+                lowAlert: lowAlert, lowThreshold: lowThreshold,
+                displayCurrency: displayCurrency)
     }
 
     @available(*, unavailable)
@@ -1294,7 +1331,7 @@ final class SettingsWindow: NSWindow {
                          apiKey: String, interval: Int, alwaysOnTop: Bool,
                          opacity: Double, accent: Int, appearanceMode: Int,
                          dashCards: [Int], dashRange: Int, showChart: Bool,
-                         lowAlert: Bool, lowThreshold: Double) {
+                         lowAlert: Bool, lowThreshold: Double, displayCurrency: Int) {
         let content = contentView!
 
         // ---- 标签栏（分段控件，高 30，点击区域大）----
@@ -1314,7 +1351,8 @@ final class SettingsWindow: NSWindow {
             buildBasicTab(displayMode: displayMode, sourceType: sourceType,
                           baseURL: baseURL, apiKey: apiKey, interval: interval),
             buildAppearanceTab(alwaysOnTop: alwaysOnTop, opacity: opacity,
-                               accent: accent, appearanceMode: appearanceMode),
+                               accent: accent, appearanceMode: appearanceMode,
+                               displayCurrency: displayCurrency),
             buildDashboardTab(dashCards: dashCards, dashRange: dashRange, showChart: showChart),
             buildAlertTab(lowAlert: lowAlert, lowThreshold: lowThreshold)
         ]
@@ -1470,10 +1508,10 @@ final class SettingsWindow: NSWindow {
     }
 
     // MARK: 外观（5 行 × 52，控件右对齐）
-    private func buildAppearanceTab(alwaysOnTop: Bool, opacity: Double, accent: Int, appearanceMode: Int) -> NSView {
+    private func buildAppearanceTab(alwaysOnTop: Bool, opacity: Double, accent: Int, appearanceMode: Int, displayCurrency: Int) -> NSView {
         let v = NSView(frame: NSRect(x: 0, y: 0, width: 380, height: 300))
-        let r = rowWidths([L.t("主题色"), L.t("面板透明度"), L.t("外观"), L.t("语言"), L.t("窗口置顶")])
-        // 行 Y：260/208/156/104/52（52px 行距）
+        let r = rowWidths([L.t("主题色"), L.t("面板透明度"), L.t("外观"), L.t("语言"), L.t("窗口置顶"), L.t("显示货币")])
+        // 行 Y：260/216/172/128/84/40（44px 行距）
 
         v.addSubview(label(L.t("主题色"), NSRect(x: 20, y: 260, width: r.labelW, height: 20)))
         currentAccent = accent
@@ -1494,21 +1532,21 @@ final class SettingsWindow: NSWindow {
         updateAccentSelection()
 
         // 透明度：滑块 + 数值右对齐
-        v.addSubview(label(L.t("面板透明度"), NSRect(x: 20, y: 208, width: r.labelW, height: 20)))
+        v.addSubview(label(L.t("面板透明度"), NSRect(x: 20, y: 216, width: r.labelW, height: 20)))
         opacitySlider.doubleValue = max(0.5, min(1.0, opacity))
         opacitySlider.isContinuous = true
         opacitySlider.target = self
         opacitySlider.action = #selector(opacityChanged)
-        opacitySlider.frame = NSRect(x: r.cx, y: 206, width: max(80, 250 - r.cx), height: 20)
+        opacitySlider.frame = NSRect(x: r.cx, y: 214, width: max(80, 250 - r.cx), height: 20)
         v.addSubview(opacitySlider)
         opacityValue.font = .systemFont(ofSize: 12)
         opacityValue.textColor = .secondaryLabelColor
-        opacityValue.frame = NSRect(x: 314, y: 208, width: 50, height: 20)
+        opacityValue.frame = NSRect(x: 314, y: 216, width: 50, height: 20)
         opacityValue.stringValue = "\(Int(round(opacity * 100)))%"
         v.addSubview(opacityValue)
 
-        v.addSubview(label(L.t("外观"), NSRect(x: 20, y: 156, width: r.labelW, height: 20)))
-        appearancePopup.frame = NSRect(x: 194, y: 152, width: 170, height: 26)
+        v.addSubview(label(L.t("外观"), NSRect(x: 20, y: 172, width: r.labelW, height: 20)))
+        appearancePopup.frame = NSRect(x: 194, y: 168, width: 170, height: 26)
         appearancePopup.removeAllItems()
         appearancePopup.addItem(withTitle: L.t("跟随系统"))
         appearancePopup.lastItem?.tag = 0
@@ -1520,8 +1558,8 @@ final class SettingsWindow: NSWindow {
         if appearancePopup.selectedTag() == -1 { appearancePopup.selectItem(withTag: 0) }
         v.addSubview(appearancePopup)
 
-        v.addSubview(label(L.t("语言"), NSRect(x: 20, y: 104, width: r.labelW, height: 20)))
-        langPopup.frame = NSRect(x: 194, y: 100, width: 170, height: 26)
+        v.addSubview(label(L.t("语言"), NSRect(x: 20, y: 128, width: r.labelW, height: 20)))
+        langPopup.frame = NSRect(x: 194, y: 124, width: 170, height: 26)
         langPopup.removeAllItems()
         langPopup.addItem(withTitle: "中文")
         langPopup.lastItem?.tag = 0
@@ -1530,10 +1568,24 @@ final class SettingsWindow: NSWindow {
         langPopup.selectItem(withTag: L.isEn ? 1 : 0)
         v.addSubview(langPopup)
 
-        v.addSubview(label(L.t("窗口置顶"), NSRect(x: 20, y: 52, width: r.labelW, height: 20)))
+        v.addSubview(label(L.t("窗口置顶"), NSRect(x: 20, y: 84, width: r.labelW, height: 20)))
         topCheck.state = alwaysOnTop ? .on : .off
-        topCheck.frame = NSRect(x: 324, y: 50, width: 40, height: 20)
+        topCheck.frame = NSRect(x: 324, y: 82, width: 40, height: 20)
         v.addSubview(topCheck)
+
+        // 显示货币：自动跟随 / 人民币 / 美元（USD 显示按汇率换算）
+        v.addSubview(label(L.t("显示货币"), NSRect(x: 20, y: 40, width: r.labelW, height: 20)))
+        currencyPopup.frame = NSRect(x: 194, y: 36, width: 170, height: 26)
+        currencyPopup.removeAllItems()
+        currencyPopup.addItem(withTitle: L.t("自动跟随"))
+        currencyPopup.lastItem?.tag = 0
+        currencyPopup.addItem(withTitle: L.t("人民币 CNY"))
+        currencyPopup.lastItem?.tag = 1
+        currencyPopup.addItem(withTitle: L.t("美元 USD"))
+        currencyPopup.lastItem?.tag = 2
+        currencyPopup.selectItem(withTag: displayCurrency)
+        if currencyPopup.selectedTag() == -1 { currencyPopup.selectItem(withTag: 0) }
+        v.addSubview(currencyPopup)
         return v
     }
 
@@ -1729,6 +1781,8 @@ final class SettingsWindow: NSWindow {
         SharedStore.set("accent", currentAccent)
         SharedStore.set("appearanceMode", appearancePopup.selectedTag() >= 0 ? appearancePopup.selectedTag() : 0)
         SharedStore.set("lang", langPopup.selectedTag() == 1 ? "en" : "zh")
+        let cur = currencyPopup.selectedTag()
+        SharedStore.set("displayCurrency", cur >= 0 ? cur : 0)
         var cards: [Int] = []
         for (i, cb) in dashCardChecks.enumerated() where cb.state == .on { cards.append(i) }
         if cards.isEmpty { cards = [0] }

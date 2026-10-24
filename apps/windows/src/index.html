@@ -62,6 +62,24 @@
 
   let interval = 60;
   let timer = 0;
+  let curMode = 0;           // 0=自动 1=CNY 2=USD
+  const USD_RATE = 7.2;      // 1 USD = 7.2 CNY
+
+  function moneySpec(b) {
+    const cur = (b.currency || "CNY").toUpperCase();
+    switch (curMode) {
+      case 1: return { sign: "¥", rate: 1 };
+      case 2: return { sign: "$", rate: 1 / USD_RATE };
+      default:
+        if (cur === "USD" || cur === "US") return { sign: "$", rate: 1 };
+        if (cur === "EUR") return { sign: "€", rate: 1 };
+        return { sign: "¥", rate: 1 };
+    }
+  }
+  function fmtMoney(v, sign, rate) {
+    const n = (parseFloat(v) || 0) * rate;
+    return sign + " " + n.toFixed(2);
+  }
 
   function paint(b) {
     const dot = $("dot");
@@ -74,7 +92,8 @@
       return;
     }
     dot.className = b.available ? "dot ok" : "dot err";
-    bal.textContent = "¥" + b.total;
+    const spec = moneySpec(b);
+    bal.textContent = fmtMoney(b.total, spec.sign, spec.rate);
     bal.classList.remove("dim");
     const t = b.updated_at ? new Date(b.updated_at * 1000).toLocaleTimeString("zh-CN") : "—";
     $("foot").textContent = "更新于 " + t;
@@ -88,6 +107,7 @@
   async function load() {
     const [cfg, b] = await Promise.all([invoke("get_config"), invoke("get_balance_cached")]);
     interval = (cfg.refresh_interval || 60) * 1000;
+    curMode = (cfg.display_currency === undefined ? 0 : cfg.display_currency);
     paint(b);
     if (!cfg.api_key) { $("foot").textContent = "未设置 Key，请点设置"; }
   }

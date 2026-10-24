@@ -16,6 +16,9 @@ struct Config {
     refresh_interval: u64,
     #[serde(default = "default_true")]
     always_on_top: bool,
+    /// 显示货币：0=自动跟随 API，1=人民币，2=美元（按汇率换算显示）
+    #[serde(default)]
+    display_currency: u64,
 }
 
 fn default_true() -> bool {
@@ -33,6 +36,7 @@ impl Config {
             },
             refresh_interval: if self.refresh_interval == 0 { 60 } else { self.refresh_interval },
             always_on_top: self.always_on_top,
+            display_currency: if self.display_currency > 2 { 0 } else { self.display_currency },
         }
     }
 }
@@ -45,6 +49,9 @@ struct Balance {
     available: bool,
     error: Option<String>,
     updated_at: u64,
+    /// API 返回币种（如 CNY / USD），供"自动跟随"显示
+    #[serde(default)]
+    currency: String,
 }
 
 // ---------- 本地数据（%APPDATA%/deepseek-usage-app） ----------
@@ -189,6 +196,7 @@ fn refresh() -> Balance {
     let mut total = String::new();
     let mut granted: Option<String> = None;
     let mut topped: Option<String> = None;
+    let mut currency = String::new();
 
     if let Some(infos) = v.get("balance_infos").and_then(|x| x.as_array()) {
         if let Some(first) = infos.first() {
@@ -197,6 +205,7 @@ fn refresh() -> Balance {
             }
             granted = first.get("granted_balance").and_then(|x| x.as_str()).map(|s| s.to_string());
             topped = first.get("topped_up_balance").and_then(|x| x.as_str()).map(|s| s.to_string());
+            currency = first.get("currency").and_then(|x| x.as_str()).unwrap_or("CNY").to_string();
         }
     }
     if total.is_empty() {
@@ -218,6 +227,7 @@ fn refresh() -> Balance {
         available,
         error: None,
         updated_at: now_ts(),
+        currency: currency.to_uppercase(),
     };
     write_json("balance.json", &b);
     append_history(&b.total);

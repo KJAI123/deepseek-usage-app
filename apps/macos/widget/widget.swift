@@ -1,5 +1,6 @@
 // DeepSeek 用量小组件（WidgetKit, macOS 14+）
 // 只读主应用写入共享目录的 balance.json（temporary-exception entitlement），每 15 分钟刷新一次
+import Foundation
 import WidgetKit
 import SwiftUI
 
@@ -19,13 +20,14 @@ struct BalanceEntry: TimelineEntry {
     let date: Date
     let total: String
     let sign: String
+    let rate: Double
     let updatedAt: Date?
     let available: Bool
 }
 
 struct BalanceProvider: TimelineProvider {
     func placeholder(in context: Context) -> BalanceEntry {
-        BalanceEntry(date: Date(), total: "—", sign: "¥", updatedAt: nil, available: true)
+        BalanceEntry(date: Date(), total: "—", sign: "¥", rate: 1.0, updatedAt: nil, available: true)
     }
 
     func getSnapshot(in context: Context, completion: @escaping (BalanceEntry) -> Void) {
@@ -42,13 +44,14 @@ struct BalanceProvider: TimelineProvider {
         // 通过共享目录读取主应用写入的余额（temporary-exception 只读授权）
         guard let data = try? Data(contentsOf: balanceFile()),
               let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
-            return BalanceEntry(date: Date(), total: "—", sign: "¥", updatedAt: nil, available: true)
+            return BalanceEntry(date: Date(), total: "—", sign: "¥", rate: 1.0, updatedAt: nil, available: true)
         }
         let ts = json["updatedAt"] as? Double ?? 0
         return BalanceEntry(
             date: Date(),
             total: json["total"] as? String ?? "—",
             sign: json["sign"] as? String ?? "¥",
+            rate: json["rate"] as? Double ?? 1.0,
             updatedAt: ts > 0 ? Date(timeIntervalSince1970: ts) : nil,
             available: json["available"] as? Bool ?? true
         )
@@ -69,7 +72,7 @@ struct BalanceWidgetView: View {
                     .foregroundColor(.white.opacity(0.72))
             }
             Spacer(minLength: 1)
-            Text("\(entry.sign) \(entry.total)")
+            Text("\(entry.sign) \(String(format: "%.2f", (Double(entry.total) ?? 0) * entry.rate))")
                 .font(.system(size: 30, weight: .semibold, design: .monospaced))
                 .foregroundColor(entry.available ? .white : Color(red: 1, green: 0.42, blue: 0.38))
                 .minimumScaleFactor(0.45)

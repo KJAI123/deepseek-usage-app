@@ -66,6 +66,17 @@
   </div>
 </div>
 
+<div class="row" style="margin-top:2px;">
+  <div>
+    <label>显示货币</label>
+    <select id="currency">
+      <option value="0">自动跟随</option>
+      <option value="1">人民币 CNY（¥）</option>
+      <option value="2">美元 USD（$）</option>
+    </select>
+  </div>
+</div>
+
 <div id="baseWrap" style="display:none">
   <label>网关地址（自动探测 /user/balance 与 /v1/user/balance）</label>
   <input id="base" placeholder="https://your-gateway.example.com">
@@ -93,6 +104,7 @@
     }
     $("interval").value = String(cfg.refresh_interval || 60);
     $("top").checked = cfg.always_on_top !== false;
+    $("currency").value = String(cfg.display_currency === undefined ? 0 : cfg.display_currency);
   }
 
   $("source").addEventListener("change", () => {
@@ -106,7 +118,8 @@
       cfg: {
         api_key: $("key").value.trim(),
         base_url: base,
-        refresh_interval: parseInt($("interval").value, 10)
+        refresh_interval: parseInt($("interval").value, 10),
+        display_currency: parseInt($("currency").value, 10)
       }
     });
     await invoke("set_always_on_top", { enabled: $("top").checked });

@@ -26,6 +26,23 @@
 
 ## Quick Start
 
+### Getting an API Key
+
+The app reads your balance with a DeepSeek **API Key**. Your key never leaves your machine.
+
+1. Open [platform.deepseek.com](https://platform.deepseek.com) → **Sign up / Log in** (email or phone).
+2. **Top up** a small amount if the balance is 0 (new accounts get a small free grant).
+3. **API Keys → Create new API key** → copy the `sk-…` string.
+4. Launch the app — the Settings window opens automatically on first launch. Paste the key and click **Save**.
+
+> In Settings, the blue link **"How to get an API Key?"** (bottom of the General tab) opens the official API Keys page directly. Full walkthrough with screenshots: [User Guide](./docs/USAGE-GUIDE.md) · [中文使用指南](./docs/USAGE-GUIDE.zh-CN.md)
+
+| Settings | Floating panel | Dashboard |
+|---|---|---|
+| ![settings](docs/screenshots/settings-general.png) | ![panel](docs/screenshots/panel-dashboard-mode.png) | ![dashboard](docs/screenshots/dashboard.png) |
+
+> Balance is **account-level, not per-key** — any key of the same account returns the same total. Multi-account switching is available via the **+ / −** buttons in Settings.
+
 ### macOS (macOS 13+)
 
 ```bash

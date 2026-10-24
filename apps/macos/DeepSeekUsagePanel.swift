@@ -322,6 +322,10 @@ enum L {
         "充值余额": "Top-up",
         "未设置 Key": "No API Key",
         "点「设置」填入 API Key": "Click Settings to add your API Key",
+        "如何获取 API Key？": "How to get an API Key?",
+        "获取 API Key 指引": "Get API Key guide",
+        "打开 DeepSeek 开放平台 API Key 页面": "Open DeepSeek Platform API Keys page",
+        "注册/登录 → 充值 → 创建 API Key → 粘贴到上方输入框": "Sign up/Log in → Top up → Create an API Key → paste it into the field above",
         "未配置网关": "No Gateway",
         "点「设置」填写网关地址": "Click Settings to set gateway URL",
         "可用": "OK",
@@ -1444,7 +1448,24 @@ final class SettingsWindow: NSWindow {
         intervalPopup.selectItem(withTag: interval)
         if intervalPopup.selectedTag() == -1 { intervalPopup.selectItem(withTag: 60) }
         v.addSubview(intervalPopup)
+
+        // 获取 API Key 指引（首次使用引导入口）
+        let guideBtn = NSButton(title: L.t("如何获取 API Key？"), target: self, action: #selector(openAPIKeyGuide))
+        guideBtn.isBordered = false
+        guideBtn.contentTintColor = .systemBlue
+        guideBtn.font = .systemFont(ofSize: 12)
+        guideBtn.frame = NSRect(x: 20, y: 8, width: min(240, 364 - 20), height: 22)
+        guideBtn.toolTip = L.t("注册/登录 → 充值 → 创建 API Key → 粘贴到上方输入框")
+        guideBtn.setAccessibilityLabel(L.t("获取 API Key 指引"))
+        v.addSubview(guideBtn)
         return v
+    }
+
+    /// 打开 DeepSeek 开放平台 API Key 页面（获取 API Key 指引）
+    @objc private func openAPIKeyGuide() {
+        if let url = URL(string: "https://platform.deepseek.com/api_keys") {
+            NSWorkspace.shared.open(url)
+        }
     }
 
     // MARK: 外观（5 行 × 52，控件右对齐）

@@ -26,6 +26,23 @@ English | [简体中文](./README.zh-CN.md)
 
 ## 快速开始
 
+### 获取 API Key（首次使用）
+
+应用需要 DeepSeek **API Key** 才能读取账号余额，Key 永远不会离开你的电脑。
+
+1. 打开 [platform.deepseek.com](https://platform.deepseek.com) → **注册 / 登录**（邮箱或手机号均可）。
+2. 余额为 0 时先**充值**少量金额（新账号平台会赠送少量额度）。
+3. **API Keys → 创建新 API key** → 复制 `sk-…` 开头的字符串。
+4. 启动应用——首次启动自动弹出设置窗口，粘贴 Key 并点击**保存**。
+
+> 设置窗口底部有蓝色链接 **「如何获取 API Key？」**，点击直接打开官方 API Key 页面。完整图文教程见：[使用指南](./docs/USAGE-GUIDE.zh-CN.md) · [User Guide](./docs/USAGE-GUIDE.md)
+
+| 设置界面 | 悬浮窗 | 用量看板 |
+|---|---|---|
+| ![设置](docs/screenshots/settings-general.png) | ![悬浮窗](docs/screenshots/panel-dashboard-mode.png) | ![看板](docs/screenshots/dashboard.png) |
+
+> 余额是**账号级**而非 Key 级——同一账号任意 Key 查到的都是同一个总余额。多账号可用设置里的 **+ / −** 按钮切换。
+
 ### macOS（macOS 13+）
 
 ```bash

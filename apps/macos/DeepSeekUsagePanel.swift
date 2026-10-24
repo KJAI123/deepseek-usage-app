@@ -594,13 +594,13 @@ final class FloatingPanel: NSPanel {
         let hasChart = SharedStore.get("showChart") as? Bool ?? true
         let h: CGFloat
         switch mode {
-        case 0: h = 100
-        case 1: h = 244
+        case 0: h = 88
+        case 1: h = 228
         default:
-            let twoRows = (SharedStore.get("dashCards") as? [Int] ?? [0, 1, 2, 3, 4, 5]).count <= 3
-            h = hasChart ? (twoRows ? 232 : 280) : (twoRows ? 150 : 210)
+            let singleRow = (SharedStore.get("dashCards") as? [Int] ?? [0, 1, 2, 3, 4, 5]).count <= 3
+            h = hasChart ? (singleRow ? 208 : 250) : (singleRow ? 118 : 176)
         }
-        let w: CGFloat = mode == 2 ? 340 : (mode == 0 ? 320 : 340)
+        let w: CGFloat = mode == 2 ? 320 : (mode == 0 ? 300 : 320)
         super.init(contentRect: NSRect(x: 0, y: 0, width: w, height: h),
                    styleMask: [.nonactivatingPanel, .borderless, .fullSizeContentView],
                    backing: .buffered, defer: false)
@@ -635,8 +635,8 @@ final class FloatingPanel: NSPanel {
     private func dashboardRows() -> Int { dashCards.count <= 3 ? 1 : 2 }
     private func dashboardHeight() -> CGFloat {
         let twoRows = dashboardRows() == 2
-        if showChart { return twoRows ? 280 : 232 }
-        return twoRows ? 210 : 150
+        if showChart { return twoRows ? 250 : 208 }
+        return twoRows ? 176 : 118
     }
 
     /// 置顶小开关（面板右上角）
@@ -665,8 +665,8 @@ final class FloatingPanel: NSPanel {
         dashboardValues.removeAll()
         chartView = nil
         rangeControl = nil
-        let w: CGFloat = isDashboard ? 340 : (isMini ? 320 : 340)
-        let h: CGFloat = isDashboard ? dashboardHeight() : (isMini ? 100 : 244)
+        let w: CGFloat = isDashboard ? 320 : (isMini ? 300 : 320)
+        let h: CGFloat = isDashboard ? dashboardHeight() : (isMini ? 88 : 228)
         setContentSize(NSSize(width: w, height: h))
         alphaValue = CGFloat(opacity)
         buildUI()
@@ -719,20 +719,20 @@ final class FloatingPanel: NSPanel {
         effect.layer?.masksToBounds = true
         content.addSubview(effect)
 
-        // 标题 + 时间范围（分段控件）+ 置顶开关——坐标随卡片行数/曲线开关自适应
+        // 标题 + 时间范围（分段控件）+ 置顶开关——坐标随卡片行数/曲线开关自适应（紧凑版）
         let hasChart = showChart
         let twoRows = dashboardRows() == 2
-        let titleY: CGFloat = hasChart ? (twoRows ? 260 : 194) : (twoRows ? 160 : 118)
-        let segY: CGFloat = hasChart ? (twoRows ? 256 : 190) : (twoRows ? 156 : 114)
-        let row1LabelY: CGFloat = hasChart ? (twoRows ? 222 : 168) : (twoRows ? 116 : 72)
-        let row1ValY: CGFloat = hasChart ? (twoRows ? 202 : 150) : (twoRows ? 98 : 54)
-        let row2LabelY: CGFloat = hasChart ? 168 : 62
-        let row2ValY: CGFloat = hasChart ? 148 : 44
+        let titleY: CGFloat = hasChart ? (twoRows ? 220 : 180) : (twoRows ? 144 : 92)
+        let segY: CGFloat = hasChart ? (twoRows ? 216 : 176) : (twoRows ? 140 : 88)
+        let row1LabelY: CGFloat = hasChart ? (twoRows ? 184 : 150) : (twoRows ? 102 : 48)
+        let row1ValY: CGFloat = hasChart ? (twoRows ? 166 : 132) : (twoRows ? 84 : 26)
+        let row2LabelY: CGFloat = hasChart ? 136 : 54
+        let row2ValY: CGFloat = hasChart ? 118 : 36
 
         let title = DragLabel(labelWithString: L.t("DeepSeek 用量"))
-        title.font = .systemFont(ofSize: 11)
+        title.font = .systemFont(ofSize: 10)
         title.textColor = .secondaryLabelColor
-        title.frame = NSRect(x: 12, y: titleY, width: 140, height: 14)
+        title.frame = NSRect(x: 12, y: titleY, width: 140, height: 12)
         content.addSubview(title)
 
         let seg = NSSegmentedControl(labels: [L.t("7天"), L.t("30天"), L.t("全部")], trackingMode: .selectOne,
@@ -740,13 +740,13 @@ final class FloatingPanel: NSPanel {
         seg.selectedSegment = dashRange == 30 ? 1 : (dashRange == 0 ? 2 : 0)
         seg.segmentStyle = .rounded
         if #available(macOS 11.0, *) { seg.selectedSegmentBezelColor = accentColor }
-        seg.frame = NSRect(x: 196, y: segY, width: 108, height: 22)
+        seg.frame = NSRect(x: 184, y: segY, width: 100, height: 20)
         content.addSubview(seg)
         rangeControl = seg
 
         // 置顶小开关（右上角）
         pinButton = makePinButton()
-        pinButton.frame = NSRect(x: 312, y: segY + 2, width: 20, height: 20)
+        pinButton.frame = NSRect(x: 292, y: segY + 1, width: 18, height: 18)
         content.addSubview(pinButton)
         updatePinIcon()
 
@@ -764,21 +764,22 @@ final class FloatingPanel: NSPanel {
             let labelY: CGFloat = row == 0 ? row1LabelY : row2LabelY
             let valY: CGFloat = row == 0 ? row1ValY : row2ValY
             let label = DragLabel(labelWithString: L.t(spec.1))
-            label.font = .systemFont(ofSize: 10)
+            label.font = .systemFont(ofSize: 9)
             label.textColor = .secondaryLabelColor
-            label.frame = NSRect(x: x, y: labelY, width: cardW, height: 14)
+            label.frame = NSRect(x: x, y: labelY, width: cardW, height: 12)
             content.addSubview(label)
             let val = DragLabel(labelWithString: "—")
-            val.font = .monospacedDigitSystemFont(ofSize: 17, weight: .semibold)
+            val.font = .monospacedDigitSystemFont(ofSize: 15, weight: .semibold)
             val.textColor = spec.1 == "当前余额" ? accentColor : .labelColor
-            val.frame = NSRect(x: x, y: valY, width: cardW, height: 18)
+            val.frame = NSRect(x: x, y: valY, width: cardW, height: 17)
             content.addSubview(val)
             dashboardValues[spec.1] = val
         }
 
         // 迷你余额曲线（可隐藏）
         if hasChart {
-            let chart = MiniChartView(frame: NSRect(x: 12, y: 8, width: content.bounds.width - 24, height: 128))
+            let chartH: CGFloat = twoRows ? 100 : 112
+            let chart = MiniChartView(frame: NSRect(x: 12, y: 8, width: content.bounds.width - 24, height: chartH))
             chart.autoresizingMask = [.width]
             chart.lineColor = accentColor
             content.addSubview(chart)
@@ -848,39 +849,39 @@ final class FloatingPanel: NSPanel {
     private func buildMiniLayout(_ content: NSView) {
         // 标题 + 状态
         let title = DragLabel(labelWithString: L.t("DeepSeek 用量"))
-        title.font = .systemFont(ofSize: 11)
+        title.font = .systemFont(ofSize: 10)
         title.textColor = .secondaryLabelColor
-        title.frame = NSRect(x: 12, y: 78, width: 120, height: 14)
+        title.frame = NSRect(x: 12, y: 68, width: 120, height: 12)
 
         statusDot = DragView()
         statusDot.wantsLayer = true
         statusDot.layer?.cornerRadius = 4
         statusDot.layer?.backgroundColor = NSColor.systemGray.cgColor
-        statusDot.frame = NSRect(x: 260, y: 80, width: 8, height: 8)
+        statusDot.frame = NSRect(x: 240, y: 70, width: 8, height: 8)
 
         statusLabel = DragLabel(labelWithString: L.t("加载中…"))
-        statusLabel.font = .systemFont(ofSize: 11)
+        statusLabel.font = .systemFont(ofSize: 10)
         statusLabel.textColor = .secondaryLabelColor
-        statusLabel.frame = NSRect(x: 274, y: 77, width: 80, height: 14)
+        statusLabel.frame = NSRect(x: 254, y: 67, width: 70, height: 12)
 
         // 总余额大字
         totalValue = DragLabel(labelWithString: "—")
-        totalValue.font = .monospacedDigitSystemFont(ofSize: 22, weight: .semibold)
+        totalValue.font = .monospacedDigitSystemFont(ofSize: 20, weight: .semibold)
         totalValue.textColor = accentColor
-        totalValue.frame = NSRect(x: 12, y: 38, width: 296, height: 32)
+        totalValue.frame = NSRect(x: 12, y: 30, width: 276, height: 28)
 
         // 底部：倒计时 + 按钮
         footerLabel = DragLabel(labelWithString: L.t("等待获取…"))
-        footerLabel.font = .systemFont(ofSize: 10)
+        footerLabel.font = .systemFont(ofSize: 9)
         footerLabel.textColor = .tertiaryLabelColor
-        footerLabel.frame = NSRect(x: 12, y: 18, width: 170, height: 14)
+        footerLabel.frame = NSRect(x: 12, y: 12, width: 160, height: 12)
 
         refreshButton = makeButton(L.t("刷新"), action: #selector(refresh))
-        refreshButton.frame = NSRect(x: 186, y: 4, width: 42, height: 24)
+        refreshButton.frame = NSRect(x: 170, y: 3, width: 40, height: 22)
         settingsButton = makeButton(L.t("设置"), action: #selector(openSettings))
-        settingsButton.frame = NSRect(x: 230, y: 4, width: 42, height: 24)
+        settingsButton.frame = NSRect(x: 212, y: 3, width: 40, height: 22)
         quitButton = makeButton(L.t("隐藏"), action: #selector(hidePanel))
-        quitButton.frame = NSRect(x: 274, y: 4, width: 42, height: 24)
+        quitButton.frame = NSRect(x: 254, y: 3, width: 40, height: 22)
 
         for v in [title, statusDot!, statusLabel!, totalValue!, footerLabel!,
                   refreshButton!, settingsButton!, quitButton!] {
@@ -890,76 +891,76 @@ final class FloatingPanel: NSPanel {
 
     private func buildFullLayout(_ content: NSView) {
         let title = DragLabel(labelWithString: "DeepSeek 用量")
-        title.font = .systemFont(ofSize: 14, weight: .semibold)
+        title.font = .systemFont(ofSize: 13, weight: .semibold)
         title.textColor = .labelColor
-        title.frame = NSRect(x: 16, y: 212, width: 160, height: 20)
+        title.frame = NSRect(x: 16, y: 196, width: 160, height: 18)
 
         statusDot = DragView()
         statusDot.wantsLayer = true
         statusDot.layer?.cornerRadius = 4
         statusDot.layer?.backgroundColor = NSColor.systemGray.cgColor
-        statusDot.frame = NSRect(x: 292, y: 218, width: 8, height: 8)
+        statusDot.frame = NSRect(x: 276, y: 200, width: 8, height: 8)
 
         statusLabel = DragLabel(labelWithString: L.t("加载中…"))
-        statusLabel.font = .systemFont(ofSize: 12)
+        statusLabel.font = .systemFont(ofSize: 11)
         statusLabel.textColor = .secondaryLabelColor
-        statusLabel.frame = NSRect(x: 306, y: 214, width: 90, height: 16)
+        statusLabel.frame = NSRect(x: 288, y: 197, width: 80, height: 14)
 
         // 置顶小开关（右上角）
         pinButton = makePinButton()
-        pinButton.frame = NSRect(x: 266, y: 212, width: 20, height: 20)
+        pinButton.frame = NSRect(x: 250, y: 196, width: 18, height: 18)
         content.addSubview(pinButton)
         updatePinIcon()
 
         let divider = DragView()
         divider.wantsLayer = true
         divider.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.12).cgColor
-        divider.frame = NSRect(x: 16, y: 200, width: 308, height: 1)
+        divider.frame = NSRect(x: 16, y: 184, width: 288, height: 1)
 
         let totalLabel = DragLabel(labelWithString: L.t("总余额"))
-        totalLabel.font = .systemFont(ofSize: 12)
+        totalLabel.font = .systemFont(ofSize: 11)
         totalLabel.textColor = .secondaryLabelColor
-        totalLabel.frame = NSRect(x: 16, y: 170, width: 80, height: 20)
+        totalLabel.frame = NSRect(x: 16, y: 156, width: 80, height: 18)
 
         totalValue = DragLabel(labelWithString: "—")
-        totalValue.font = .monospacedDigitSystemFont(ofSize: 16, weight: .semibold)
+        totalValue.font = .monospacedDigitSystemFont(ofSize: 15, weight: .semibold)
         totalValue.textColor = accentColor
         totalValue.alignment = .right
-        totalValue.frame = NSRect(x: 180, y: 166, width: 144, height: 24)
+        totalValue.frame = NSRect(x: 176, y: 152, width: 124, height: 22)
 
         let grantedLabel = DragLabel(labelWithString: L.t("赠送余额"))
-        grantedLabel.font = .systemFont(ofSize: 12)
+        grantedLabel.font = .systemFont(ofSize: 11)
         grantedLabel.textColor = .secondaryLabelColor
-        grantedLabel.frame = NSRect(x: 16, y: 142, width: 80, height: 20)
+        grantedLabel.frame = NSRect(x: 16, y: 128, width: 80, height: 18)
 
         grantedValue = DragLabel(labelWithString: "—")
-        grantedValue.font = .monospacedDigitSystemFont(ofSize: 13, weight: .regular)
+        grantedValue.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
         grantedValue.textColor = .secondaryLabelColor
         grantedValue.alignment = .right
-        grantedValue.frame = NSRect(x: 180, y: 138, width: 144, height: 22)
+        grantedValue.frame = NSRect(x: 176, y: 124, width: 124, height: 20)
 
         let toppedLabel = DragLabel(labelWithString: L.t("充值余额"))
-        toppedLabel.font = .systemFont(ofSize: 12)
+        toppedLabel.font = .systemFont(ofSize: 11)
         toppedLabel.textColor = .secondaryLabelColor
-        toppedLabel.frame = NSRect(x: 16, y: 114, width: 80, height: 20)
+        toppedLabel.frame = NSRect(x: 16, y: 100, width: 80, height: 18)
 
         toppedValue = DragLabel(labelWithString: "—")
-        toppedValue.font = .monospacedDigitSystemFont(ofSize: 13, weight: .regular)
+        toppedValue.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
         toppedValue.textColor = .secondaryLabelColor
         toppedValue.alignment = .right
-        toppedValue.frame = NSRect(x: 180, y: 110, width: 144, height: 22)
+        toppedValue.frame = NSRect(x: 176, y: 96, width: 124, height: 20)
 
         footerLabel = DragLabel(labelWithString: L.t("等待获取…"))
-        footerLabel.font = .systemFont(ofSize: 11)
+        footerLabel.font = .systemFont(ofSize: 10)
         footerLabel.textColor = .tertiaryLabelColor
-        footerLabel.frame = NSRect(x: 16, y: 78, width: 300, height: 16)
+        footerLabel.frame = NSRect(x: 16, y: 64, width: 288, height: 14)
 
         refreshButton = makeButton(L.t("刷新"), action: #selector(refresh))
-        refreshButton.frame = NSRect(x: 150, y: 28, width: 56, height: 26)
+        refreshButton.frame = NSRect(x: 146, y: 24, width: 52, height: 24)
         settingsButton = makeButton(L.t("设置"), action: #selector(openSettings))
-        settingsButton.frame = NSRect(x: 210, y: 28, width: 56, height: 26)
+        settingsButton.frame = NSRect(x: 202, y: 24, width: 52, height: 24)
         quitButton = makeButton(L.t("隐藏"), action: #selector(hidePanel))
-        quitButton.frame = NSRect(x: 270, y: 28, width: 56, height: 26)
+        quitButton.frame = NSRect(x: 254, y: 24, width: 52, height: 24)
 
         for v in [title, statusDot!, statusLabel!, divider,
                   totalLabel, totalValue!, grantedLabel, grantedValue!,

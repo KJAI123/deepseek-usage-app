@@ -1910,9 +1910,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     private var dashboardItem: NSMenuItem?
     private var quitItem: NSMenuItem?
     private var statusMenu: NSMenu?
-    private var pendingShowMenu = false
-    private var lastStatusClick: TimeInterval = 0
-    private var clickMonitor: Any?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -1965,41 +1962,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         quitItem.target = self
         self.quitItem = quitItem
 
-        // 单击弹菜单、双击弹出浮窗、右键弹菜单：
-        // 用本地事件监视器统计状态项窗口上的点击（NSStatusItem 的真实双击 clickCount 不一定累积，
-        // 不依赖 button action 触发次数，按时间间隔判定最可靠）
-        clickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseUp, .rightMouseUp]) { [weak self] event in
-            guard let self = self,
-                  let btn = self.statusItem?.button,
-                  let win = btn.window,
-                  event.window === win else { return event }
-            let now = ProcessInfo.processInfo.systemUptime
-            if event.type == .rightMouseUp {
-                self.pendingShowMenu = false
-                self.statusMenu?.popUp(positioning: nil, at: NSPoint(x: 0, y: btn.bounds.height + 6), in: btn)
-                return nil
-            }
-            let isDoubleClick = (now - self.lastStatusClick) < 0.3
-            self.lastStatusClick = now
-            if isDoubleClick {
-                self.pendingShowMenu = false
-                if let p = self.panel {
-                    // 浮窗被隐藏（orderOut）时 orderFrontRegardless 不会重新显示，必须先 orderFront
-                    if !p.isVisible { p.orderFront(nil) }
-                    p.orderFrontRegardless()
-                    NSApp.activate(ignoringOtherApps: true)
-                }
-                return nil
-            }
-            // 单击：延迟弹出菜单；期间若出现双击则取消（让双击优先弹出浮窗）
-            self.pendingShowMenu = true
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
-                guard let self = self, self.pendingShowMenu else { return }
-                self.pendingShowMenu = false
-                self.statusMenu?.popUp(positioning: nil, at: NSPoint(x: 0, y: btn.bounds.height + 6), in: btn)
-            }
-            return nil
-        }
+        // 点击图标直接弹出菜单（不区分单击/双击）
+        item.menu = menu
         statusMenu = menu
         statusItem = item
     }
@@ -2067,10 +2031,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     }
 
     @objc private func quitApp() { NSApp.terminate(nil) }
-
-    deinit {
-        if let m = clickMonitor { NSEvent.removeMonitor(m) }
-    }
 
     func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool { true }
 }

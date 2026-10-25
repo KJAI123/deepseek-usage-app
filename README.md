@@ -18,6 +18,7 @@
 | Dashboard mode (cards + chart inside the floating panel) | ✅ | 🚧 Planned |
 | Always-on-top toggle (can be disabled in Settings) | ✅ | ✅ |
 | Menu bar / system tray resident | ✅ | ✅ |
+| Menu bar icon: single-click menu, double-click pops the floating panel | ✅ | — |
 | Desktop widget (WidgetKit) | ✅ | — |
 | Usage dashboard (balance curve / daily usage / dual-axis, customizable cards) | ✅ | ✅ |
 | Launch at login | ✅ | 🚧 Planned |
@@ -51,7 +52,7 @@ cd apps/macos
 open DeepSeekUsagePanel.app
 ```
 
-On first launch the Settings window opens automatically — paste your API Key (`sk-…`) and save. The app then lives in the **menu bar (¥ icon)**: click to show/hide the panel; the menu offers Dashboard, Settings, Launch at Login and Quit.
+On first launch the Settings window opens automatically — paste your API Key (`sk-…`) and save. The app then lives in the **menu bar (¥ icon)**: single-click opens the menu; **double-click pops the floating panel**; the menu offers Dashboard, Settings, Launch at Login and Quit.
 
 **Always on top**: the panel stays above all windows by default; uncheck *Settings → Window always on top* to let it behave like a normal window.
 

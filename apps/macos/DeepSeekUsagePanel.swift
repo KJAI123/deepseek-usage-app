@@ -1909,6 +1909,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     private var settingsItem: NSMenuItem?
     private var dashboardItem: NSMenuItem?
     private var quitItem: NSMenuItem?
+    private var statusMenu: NSMenu?
+    private var pendingShowMenu = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -1961,8 +1963,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         quitItem.target = self
         self.quitItem = quitItem
 
-        item.menu = menu
+        // 单击弹菜单、双击弹出浮窗：不用 item.menu（否则拦截不到双击），改用 button action
+        item.button?.target = self
+        item.button?.action = #selector(statusItemClicked(_:))
+        statusMenu = menu
         statusItem = item
+    }
+
+    /// 菜单栏图标点击：左键单击→菜单（延迟以区分双击），左键双击→弹出浮窗，右键→菜单
+    @objc private func statusItemClicked(_ sender: Any?) {
+        guard let button = statusItem?.button else { return }
+        // 注意：AX 合成点击时 NSApp.currentEvent 可能为 nil，故全部走兜底
+        let event = NSApp.currentEvent
+        if event?.type == .rightMouseUp {
+            pendingShowMenu = false
+            statusMenu?.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.height + 6), in: button)
+            return
+        }
+        let clickCount = event?.clickCount ?? 1
+        if clickCount >= 2 {
+            pendingShowMenu = false
+            // 双击：弹出浮窗
+            panel?.orderFrontRegardless()
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+        // 单击：延迟弹出菜单；期间若出现双击则取消（让双击优先弹出浮窗）
+        pendingShowMenu = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+            guard let self = self, self.pendingShowMenu else { return }
+            self.pendingShowMenu = false
+            self.statusMenu?.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.height + 6), in: button)
+        }
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {

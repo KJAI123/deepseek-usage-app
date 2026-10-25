@@ -1919,6 +1919,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         panel = p
         NSLog("DSAPP launch: panel created, alwaysOnTop=\(SharedStore.get("alwaysOnTop") as? Bool ?? true) level=\(p.level.rawValue)")
         p.orderFrontRegardless()
+        // 右键浮窗任意位置：弹出与菜单栏相同的下拉菜单（用量看板/显示或隐藏面板/设置/开机自启/退出）
+        p.contentView?.menu = statusMenu
         NSLog("DSAPP launch: ordered front, isVisible=\(p.isVisible)")
         p.refresh()
         if (SharedStore.apiKey() ?? "").isEmpty {

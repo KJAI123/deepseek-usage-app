@@ -23,6 +23,7 @@
   .dot.ok { background: #34d399; }
   .dot.err { background: #f87171; }
   .title { font-size: 12px; color: #7d90b8; }
+  .side { margin-left: auto; font-size: 11px; color: #6b7fa8; white-space: nowrap; }
   .balance { font-size: 26px; font-weight: 700; color: #4da3ff; letter-spacing: 0.5px; }
   .balance.dim { color: #7d90b8; }
   .foot { font-size: 10px; color: #5b6c8f; }
@@ -45,6 +46,7 @@
 <div class="panel" data-tauri-drag-region>
   <div class="row">
     <span class="title" id="title">DeepSeek 余额</span>
+    <span class="side" id="side"></span>
     <span class="dot" id="dot"></span>
   </div>
   <div class="balance dim" id="balance">—</div>
@@ -81,9 +83,23 @@
     return sign + " " + n.toFixed(2);
   }
 
+  // 副账号一行摘要：DeepSeek 显示余额，智谱显示 5h/本周剩余
+  function paintSide(sb) {
+    const el = $("side");
+    if (!sb || sb.error) { el.textContent = ""; return; }
+    if ((sb.provider || "") === "zhipu") {
+      const rem5 = (typeof sb.q5_pct === "number" && sb.q5_pct >= 0) ? Math.max(0, 100 - sb.q5_pct) : null;
+      const remW = (typeof sb.qw_pct === "number" && sb.qw_pct >= 0) ? Math.max(0, 100 - sb.qw_pct) : null;
+      el.textContent = "智谱 " + (rem5 === null ? "—" : rem5 + "%") + "/" + (remW === null ? "—" : remW + "%");
+    } else {
+      el.textContent = "DS ¥" + (parseFloat(sb.total) || 0).toFixed(0);
+    }
+  }
+
   function paint(b) {
     const dot = $("dot");
     const bal = $("balance");
+    paintSide(b.secondary);
     if (b.error) {
       dot.className = "dot err";
       bal.textContent = "—";

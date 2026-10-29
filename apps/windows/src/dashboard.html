@@ -176,14 +176,28 @@ if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandl
 function fetchData(cb) {
   if (window.__DS_DATA__) { cb(window.__DS_DATA__); return; }
   if (window.__TAURI__ && window.__TAURI__.core) {
+    // 直接调 refresh：一次拿到主账号 + 并列的副账号（缓存里没有副账号快照）
     Promise.all([
-      window.__TAURI__.core.invoke("get_balance_cached"),
+      window.__TAURI__.core.invoke("refresh"),
       window.__TAURI__.core.invoke("get_history")
     ]).then(function (res) {
       const b = res[0] || {};
+      const q5 = (typeof b.q5_pct === "number" && b.q5_pct >= 0) ? b.q5_pct : null;
+      const qw = (typeof b.qw_pct === "number" && b.qw_pct >= 0) ? b.qw_pct : null;
+      const s = b.secondary || null;
       cb({
         sign: "¥", current: b.total || "", entries: res[1] || [],
-        provider: b.provider || "deepseek", plan: b.plan || "", planUntil: b.plan_until || ""
+        provider: b.provider || "deepseek", plan: b.plan || "", planUntil: b.plan_until || "",
+        q5Pct: q5, qwPct: qw,
+        side: s ? {
+          provider: s.provider || "deepseek",
+          total: s.total || "",
+          granted: s.granted || "0",
+          topped: s.topped || "0",
+          plan: s.plan || "",
+          q5Pct: (typeof s.q5_pct === "number" && s.q5_pct >= 0) ? s.q5_pct : -1,
+          qwPct: (typeof s.qw_pct === "number" && s.qw_pct >= 0) ? s.qw_pct : -1
+        } : null
       });
     }).catch(function () { cb({ sign: "¥", current: "", entries: [] }); });
     return;

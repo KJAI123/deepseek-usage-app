@@ -83,6 +83,20 @@
   <input id="base" placeholder="https://your-gateway.example.com">
 </div>
 
+<div class="row" style="margin-top:14px;">
+  <div>
+    <label>第二个账号 Key（选填，与第一个并列显示）</label>
+    <input id="key2" type="password" placeholder="留空则只显示第一个账号">
+  </div>
+  <div>
+    <label>第二个账号数据源</label>
+    <select id="source2">
+      <option value="deepseek">DeepSeek 官方</option>
+      <option value="zhipu">智谱 AI（GLM）</option>
+    </select>
+  </div>
+</div>
+
 <label style="display:flex; align-items:center; gap:8px; margin-top:14px;">
   <input id="top" type="checkbox" style="width:auto;" checked>
   <span>窗口始终置顶</span>
@@ -109,6 +123,8 @@
     $("interval").value = String(cfg.refresh_interval || 60);
     $("top").checked = cfg.always_on_top !== false;
     $("currency").value = String(cfg.display_currency === undefined ? 0 : cfg.display_currency);
+    $("key2").value = cfg.second_api_key || "";
+    $("source2").value = (cfg.second_provider || "") === "zhipu" ? "zhipu" : "deepseek";
   }
 
   $("source").addEventListener("change", () => {
@@ -128,7 +144,9 @@
         base_url: base,
         refresh_interval: parseInt($("interval").value, 10),
         display_currency: parseInt($("currency").value, 10),
-        provider: provider
+        provider: provider,
+        second_api_key: $("key2").value.trim(),
+        second_provider: $("key2").value.trim() ? $("source2").value : ""
       }
     });
     await invoke("set_always_on_top", { enabled: $("top").checked });

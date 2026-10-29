@@ -22,6 +22,12 @@ struct Config {
     /// 数据源：deepseek / zhipu / custom
     #[serde(default)]
     provider: String,
+    /// 并列显示的第二个账号（留空则不显示）
+    #[serde(default)]
+    second_api_key: String,
+    /// 第二个账号的数据源：deepseek / zhipu
+    #[serde(default)]
+    second_provider: String,
 }
 
 fn default_true() -> bool {
@@ -43,6 +49,13 @@ impl Config {
             provider: match self.provider.trim() {
                 "zhipu" => "zhipu".to_string(),
                 "custom" => "custom".to_string(),
+                _ => "deepseek".to_string(),
+            },
+            second_api_key: self.second_api_key.trim().to_string(),
+            second_provider: match self.second_provider.trim() {
+                "zhipu" => "zhipu".to_string(),
+                "custom" => "custom".to_string(),
+                "" => String::new(),
                 _ => "deepseek".to_string(),
             },
         }
@@ -82,6 +95,9 @@ struct Balance {
     qw_used: i64,
     #[serde(default)]
     qw_reset: String,
+    /// 并列：副账号快照
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    secondary: Option<Box<Balance>>,
 }
 
 // ---------- 本地数据（%APPDATA%/deepseek-usage-app） ----------
@@ -196,6 +212,25 @@ fn append_history(total: &str, provider: &str) {
 #[tauri::command]
 fn refresh() -> Balance {
     let cfg = get_config().normalized();
+    let mut primary = refresh_primary(&cfg, true);
+    // 并列：配置了第二个账号就一起拉，失败只影响副块
+    if !cfg.second_api_key.is_empty() {
+        let secondary_cfg = Config {
+            api_key: cfg.second_api_key.clone(),
+            provider: if cfg.second_provider.is_empty() {
+                "deepseek".to_string()
+            } else {
+                cfg.second_provider.clone()
+            },
+            ..cfg.clone()
+        };
+        primary.secondary = Some(Box::new(refresh_primary(&secondary_cfg, false)));
+    }
+    primary
+}
+
+/// 拉取单个账号；persist=false 时不写 balance.json / history（副账号用）
+fn refresh_primary(cfg: &Config, persist: bool) -> Balance {
     if cfg.api_key.is_empty() {
         return Balance {
             error: Some("未设置 API Key，请在设置中填写".into()),
@@ -217,7 +252,7 @@ fn refresh() -> Balance {
     };
 
     if cfg.provider == "zhipu" {
-        return refresh_zhipu(&client, &cfg);
+        return refresh_zhipu(&client, cfg, persist);
     }
 
     // 自动探测 {base}/user/balance 与 {base}/v1/user/balance
@@ -303,15 +338,18 @@ fn refresh() -> Balance {
         qw_total: 0,
         qw_used: 0,
         qw_reset: String::new(),
+        secondary: None,
     };
-    write_json("balance.json", &b);
-    append_history(&b.total, &b.provider);
+    if persist {
+        write_json("balance.json", &b);
+        append_history(&b.total, &b.provider);
+    }
     b
 }
 
 /// 智谱 AI（GLM）：可用余额 + Coding Plan 套餐名/到期日
 /// 业务码约定：code == 200 才算成功（不是 0）
-fn refresh_zhipu(client: &reqwest::blocking::Client, cfg: &Config) -> Balance {
+fn refresh_zhipu(client: &reqwest::blocking::Client, cfg: &Config, persist: bool) -> Balance {
     let mut last_err = "请求失败".to_string();
 
     // 1) 财务总览：data.availableTotalBalance
@@ -453,9 +491,12 @@ fn refresh_zhipu(client: &reqwest::blocking::Client, cfg: &Config) -> Balance {
         qw_total,
         qw_used,
         qw_reset,
+        secondary: None,
     };
-    write_json("balance.json", &b);
-    append_history(&b.total, &b.provider);
+    if persist {
+        write_json("balance.json", &b);
+        append_history(&b.total, &b.provider);
+    }
     b
 }
 

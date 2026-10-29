@@ -93,15 +93,32 @@
     }
     dot.className = b.available ? "dot ok" : "dot err";
     const spec = moneySpec(b);
+    const isZhipu = (b.provider || "") === "zhipu";
+
+    // 智谱：主数字是 Coding Plan 的 5 小时剩余额度，本周额度放在副行
+    if (isZhipu) {
+      const rem5 = (typeof b.q5_pct === "number" && b.q5_pct >= 0) ? Math.max(0, 100 - b.q5_pct) : null;
+      const remW = (typeof b.qw_pct === "number" && b.qw_pct >= 0) ? Math.max(0, 100 - b.qw_pct) : null;
+      $("title").textContent = "智谱 用量";
+      bal.textContent = rem5 === null ? "—" : (rem5 + "%");
+      bal.classList.toggle("dim", rem5 === null);
+      if (rem5 === 0) bal.style.color = "#f87171";
+      else if (rem5 !== null && rem5 < 10) bal.style.color = "#f59e0b";
+      else bal.style.color = "#4da3ff";
+      if (remW !== null && remW === 0) dot.className = "dot err";   // 本周用尽
+      const parts = [];
+      parts.push(remW === null ? "本周额度 —" : "本周额度 " + remW + "%");
+      if (b.plan) parts.push(b.plan);
+      $("foot").textContent = parts.join(" · ");
+      return;
+    }
+
+    bal.style.color = "";
     bal.textContent = fmtMoney(b.total, spec.sign, spec.rate);
     bal.classList.remove("dim");
-    const isZhipu = (b.provider || "") === "zhipu";
-    $("title").textContent = isZhipu ? "智谱 余额" : "DeepSeek 余额";
+    $("title").textContent = "DeepSeek 余额";
     const t = b.updated_at ? new Date(b.updated_at * 1000).toLocaleTimeString("zh-CN") : "—";
-    // 智谱：套餐名 + 到期日；DeepSeek：更新时间
-    $("foot").textContent = isZhipu && b.plan
-      ? (b.plan + " · 到期 " + (b.plan_until || "—"))
-      : "更新于 " + t;
+    $("foot").textContent = "更新于 " + t;
   }
 
   async function refreshNow() {

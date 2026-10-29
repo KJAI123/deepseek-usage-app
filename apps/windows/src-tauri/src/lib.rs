@@ -66,6 +66,22 @@ struct Balance {
     plan: String,
     #[serde(default)]
     plan_until: String,
+    #[serde(default)]
+    q5_pct: i64,
+    #[serde(default)]
+    q5_total: i64,
+    #[serde(default)]
+    q5_used: i64,
+    #[serde(default)]
+    q5_reset: String,
+    #[serde(default)]
+    qw_pct: i64,
+    #[serde(default)]
+    qw_total: i64,
+    #[serde(default)]
+    qw_used: i64,
+    #[serde(default)]
+    qw_reset: String,
 }
 
 // ---------- 本地数据（%APPDATA%/deepseek-usage-app） ----------
@@ -88,6 +104,27 @@ fn write_json<T: Serialize>(name: &str, val: &T) {
     if let Ok(data) = serde_json::to_vec_pretty(val) {
         let _ = fs::write(dir.join(name), data);
     }
+}
+
+/// 毫秒时间戳 → "MM-dd HH:mm"（固定东八区，免第三方依赖）
+fn fmt_reset_ts(ms: i64) -> String {
+    if ms <= 0 { return String::new(); }
+    let secs = ms / 1000 + 8 * 3600;
+    let days = secs / 86400;
+    let rem = secs % 86400;
+    let (hh, mm) = (rem / 3600, (rem % 3600) / 60);
+    // 1970-01-01 起的天数 → 公历年月日（Howard Hinnant 算法）
+    let z = days + 719468;
+    let era = if z >= 0 { z } else { z - 146096 } / 146097;
+    let doe = z - era * 146097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let _ = y;
+    format!("{:02}-{:02} {:02}:{:02}", m, d, hh, mm)
 }
 
 fn now_ts() -> u64 {
@@ -258,6 +295,14 @@ fn refresh() -> Balance {
         provider: cfg.provider.clone(),
         plan: String::new(),
         plan_until: String::new(),
+        q5_pct: -1,
+        q5_total: 0,
+        q5_used: 0,
+        q5_reset: String::new(),
+        qw_pct: -1,
+        qw_total: 0,
+        qw_used: 0,
+        qw_reset: String::new(),
     };
     write_json("balance.json", &b);
     append_history(&b.total, &b.provider);
@@ -345,6 +390,50 @@ fn refresh_zhipu(client: &reqwest::blocking::Client, cfg: &Config) -> Balance {
         }
     }
 
+    // 3) Coding Plan 额度：/api/monitor/usage/quota/limit
+    let mut q5_pct = -1i64;
+    let mut q5_total = 0i64;
+    let mut q5_used = 0i64;
+    let mut q5_reset = String::new();
+    let mut qw_pct = -1i64;
+    let mut qw_total = 0i64;
+    let mut qw_used = 0i64;
+    let mut qw_reset = String::new();
+    if let Ok(resp) = client
+        .get("https://open.bigmodel.cn/api/monitor/usage/quota/limit")
+        .bearer_auth(&cfg.api_key)
+        .send()
+    {
+        if let Ok(v) = resp.json::<serde_json::Value>() {
+            if (v.get("code").and_then(|x| x.as_i64()).unwrap_or(-1)) == 200 {
+                if let Some(limits) = v.get("data").and_then(|d| d.get("limits")).and_then(|x| x.as_array()) {
+                    let mut parsed: Vec<(i64, i64, i64, String)> = limits
+                        .iter()
+                        .filter_map(|it| {
+                            let total = it.get("usage").and_then(|x| x.as_i64()).unwrap_or(0);
+                            let used = it.get("currentValue").and_then(|x| x.as_i64()).unwrap_or(0);
+                            let pct = it.get("percentage").and_then(|x| x.as_i64()).unwrap_or(0);
+                            let reset = it
+                                .get("nextResetTime")
+                                .and_then(|x| x.as_i64())
+                                .map(|ms| {
+                                    // 毫秒时间戳 → 本地 MM-dd HH:mm
+                                    fmt_reset_ts(ms)
+                                })
+                                .unwrap_or_default();
+                            if total > 0 { Some((total, used, pct, reset)) } else { None }
+                        })
+                        .collect();
+                    parsed.sort_by_key(|p| p.0);
+                    if parsed.len() >= 2 {
+                        q5_total = parsed[0].0; q5_used = parsed[0].1; q5_pct = parsed[0].2; q5_reset = parsed[0].3.clone();
+                        qw_total = parsed[1].0; qw_used = parsed[1].1; qw_pct = parsed[1].2; qw_reset = parsed[1].3.clone();
+                    }
+                }
+            }
+        }
+    }
+
     let b = Balance {
         total: format!("{:.2}", total),
         granted: None,
@@ -356,6 +445,14 @@ fn refresh_zhipu(client: &reqwest::blocking::Client, cfg: &Config) -> Balance {
         provider: "zhipu".into(),
         plan,
         plan_until,
+        q5_pct,
+        q5_total,
+        q5_used,
+        q5_reset,
+        qw_pct,
+        qw_total,
+        qw_used,
+        qw_reset,
     };
     write_json("balance.json", &b);
     append_history(&b.total, &b.provider);

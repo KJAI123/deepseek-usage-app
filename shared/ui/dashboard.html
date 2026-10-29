@@ -119,7 +119,7 @@
 
 <script>
 const DEFAULT_CFG = { cards: ["cur","today","cum","topup","days","max","left"], mode: "balance" };
-const ALL_CARDS = ["cur","today","cum","topup","days","max","left"];
+const ALL_CARDS = ["cur","today","cum","topup","days","max","left","plan","planEnd"];
 
 /* ---------- 本地化（zh / en） ---------- */
 const I18N = {
@@ -130,7 +130,8 @@ const I18N = {
   "预估可用": "Days Left", "图表模式": "Chart Mode",
   "余额趋势": "Balance", "每日使用量": "Daily Usage", "余额 + 使用量对比": "Balance + Usage",
   "保存": "Save", "取消": "Cancel", "天": "d",
-  "余额": "Balance", "使用量": "Usage", "余额: ": "Balance: ", "使用量: ": "Usage: "
+  "余额": "Balance", "使用量": "Usage", "余额: ": "Balance: ", "使用量: ": "Usage: ",
+  "套餐": "Plan", "套餐到期": "Plan Expiry", "无套餐": "No plan"
 };
 function T(key, lang) {
   const l = lang || ((window.__DS_DATA__ && window.__DS_DATA__.lang) || "zh");
@@ -261,8 +262,9 @@ function renderCards(D) {
   }
   const lang = D.lang || "zh";
 
+  const isZhipu = (D.provider === "zhipu");
   const data = {
-    cur: { label: T("当前余额", lang), cls: "bal", text: D.current ? sign + D.current : "—" },
+    cur: { label: T(isZhipu ? "余额" : "当前余额", lang), cls: "bal", text: D.current ? sign + D.current : "—" },
     today: { label: T("今日消耗", lang), cls: "use", text: todayUsage > 0.001 ? sign + todayUsage.toFixed(2) : "0.00" },
     cum: { label: T("累计消耗", lang), cls: "use", text: cumUsage > 0.001 ? sign + cumUsage.toFixed(2) : "0.00" },
     topup: { label: T("累计充值", lang), cls: "up", text: cumTopup > 0.001 ? "+" + sign + cumTopup.toFixed(2) : "0.00" },
@@ -271,7 +273,19 @@ function renderCards(D) {
     left: { label: T("预估可用", lang), cls: (daysLeft != null && daysLeft < 1) ? "warn" : "bal", text: daysLeft != null ? Math.floor(daysLeft) + " " + T("天", lang) : "—" }
   };
 
-  const visible = ALL_CARDS.filter(k => cfg.cards.indexOf(k) >= 0);
+  // 智谱：没有"今日消耗/累计消耗/充值/预估可用"口径，这些卡片换成就「套餐 / 套餐到期」
+  if (isZhipu) {
+    data.plan = { label: T("套餐", lang), cls: "bal", text: D.plan ? D.plan : T("无套餐", lang) };
+    data.planEnd = { label: T("套餐到期", lang), cls: "bal", text: D.planUntil ? D.planUntil : "—" };
+  }
+  const cardKeys = cfg.cards.map(k => {
+    if (!isZhipu) return k;
+    if (k === "today") return "plan";
+    if (k === "cum") return "planEnd";
+    if (k === "topup" || k === "left") return null;
+    return k;
+  }).filter(k => k !== null);
+  const visible = ALL_CARDS.filter(k => cardKeys.indexOf(k) >= 0 && data[k]);
   const statsEl = document.getElementById("stats");
   statsEl.style.gridTemplateColumns = "repeat(" + Math.min(4, Math.max(1, visible.length)) + ", 1fr)";
   let html = "";

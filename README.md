@@ -1,7 +1,7 @@
 # DeepSeek Usage Panel
 
-> A tiny always-on-top floating panel for your DeepSeek API balance, with a usage dashboard and desktop widget.
-> Minimal display, real-time refresh, official API & custom gateway support. Open source for **macOS / Windows**.
+> A tiny always-on-top floating panel for your **DeepSeek / Zhipu AI (GLM)** API balance, with a usage dashboard and desktop widget.
+> Minimal display, real-time refresh, official API, Zhipu GLM Coding Plan & custom gateway support. Open source for **macOS / Windows**.
 
 [简体中文](./README.zh-CN.md) | English
 
@@ -24,6 +24,7 @@
 | Launch at login | ✅ | 🚧 Planned |
 | Custom gateway (new-api / one-api) | ✅ | ✅ |
 | Low-balance alert | ✅ | 🚧 Planned |
+| Zhipu AI (GLM) balance + Coding Plan support | ✅ | 🚧 Planned |
 
 ## Quick Start
 
@@ -43,6 +44,17 @@ The app reads your balance with a DeepSeek **API Key**. Your key never leaves yo
 | ![settings](docs/screenshots/settings-general.png) | ![panel](docs/screenshots/panel-dashboard-mode.png) | ![dashboard](docs/screenshots/dashboard.png) |
 
 > Balance is **account-level, not per-key** — any key of the same account returns the same total. Multi-account switching is available via the **+ / −** buttons in Settings.
+
+### Zhipu AI (GLM) support
+
+In **Settings → Data Source**, choose **Zhipu AI (GLM)** and paste a Zhipu API Key (`id.secret`, created at [bigmodel.cn](https://bigmodel.cn/usercenter/proj-mgmt/apikeys)). The panel then shows:
+
+- **Available balance** (cash + grants, CNY) from the finance overview
+- **Plan** name and **plan expiry** (e.g. `GLM Coding Lite` / `2027-03-07`) from your active subscription
+
+Accounts are isolated: each account keeps its own balance history, so switching between DeepSeek and Zhipu never produces a fake "usage" spike.
+
+> Note: Zhipu does not expose per-plan credit consumption (the 5-hour / weekly quota) through its API — that endpoint is blocked by the gateway. The app shows plan status and expiry instead of guessing a quota number.
 
 ### macOS (macOS 13+)
 

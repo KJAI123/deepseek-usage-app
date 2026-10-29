@@ -95,6 +95,9 @@ enum SharedStore {
             "granted": b.granted ?? "0",
             "topped": b.toppedUp ?? "0",
             "available": b.isAvailable,
+            "provider": b.provider,
+            "plan": b.plan ?? "",
+            "planUntil": b.planValidUntil ?? "",
             "updatedAt": Date().timeIntervalSince1970,
         ]
         write("balance.json", payload)
@@ -128,6 +131,41 @@ enum SharedStore {
         if let a = currentAccount(), let n = a["name"] as? String, !n.isEmpty { return n }
         return "Account \(accountIndex() + 1)"
     }
+
+    // MARK: - 数据源 provider（按账号记录）：deepseek / zhipu / custom
+    static let providerDeepSeek = "deepseek"
+    static let providerZhipu = "zhipu"
+    static let providerCustom = "custom"
+
+    static func currentProvider() -> String {
+        if let a = currentAccount(), let p = a["provider"] as? String, !p.isEmpty { return p }
+        return (get("sourceType") as? Int ?? 0) == 1 ? providerCustom : providerDeepSeek
+    }
+    static func setCurrentProvider(_ p: String) {
+        var list = accounts()
+        if list.isEmpty {
+            list.append(["name": "Account 1", "key": apiKey() ?? "", "provider": p])
+        } else {
+            let i = accountIndex()
+            var a = list[i]
+            a["provider"] = p
+            list[i] = a
+        }
+        set("accounts", list)
+    }
+    static func providerLabel(_ p: String) -> String {
+        switch p {
+        case providerZhipu:  return L.t("智谱 AI")
+        case providerCustom: return L.t("自定义网关")
+        default:             return "DeepSeek"
+        }
+    }
+    /// 账号在 UI 中的显示名（名称 · provider）
+    static func accountTitle(_ a: [String: Any], index: Int) -> String {
+        let name = a["name"] as? String ?? "Account \(index + 1)"
+        let p = a["provider"] as? String ?? ((get("sourceType") as? Int ?? 0) == 1 ? providerCustom : providerDeepSeek)
+        return "\(name) · \(providerLabel(p))"
+    }
     /// 添加/更新当前账号 key：无 accounts 时创建；已有则更新当前项
     static func upsertCurrentAccount(key: String) {
         var list = accounts()
@@ -141,9 +179,9 @@ enum SharedStore {
         }
         set("accounts", list)
     }
-    static func addAccount(key: String) {
+    static func addAccount(key: String, provider: String = providerDeepSeek) {
         var list = accounts()
-        list.append(["name": "Account \(list.count + 1)", "key": key])
+        list.append(["name": "Account \(list.count + 1)", "key": key, "provider": provider])
         set("accounts", list)
         set("accountIndex", list.count - 1)
     }
@@ -166,13 +204,17 @@ enum SharedStore {
     /// 追加一条余额记录到共享历史（同一次刷新 5 秒内去重，保留近 90 天）
     /// 存储策略：近 48 小时保留全部细粒度采样；更早的数据按自然日折叠为首尾两条，
     /// 从而"记录天数"能真实覆盖数天/数十天，且文件不会无限膨胀。
+    /// 当前账号标识：provider + 账号序号，用于按账号隔离余额历史（避免切换账号后把余额骤降误算成消耗）
+    static func currentAccountTag() -> String { "\(currentProvider())#\(accountIndex())" }
+
     static func appendHistory(total: String) {
         var entries = historyEntries()
         let ts = Date().timeIntervalSince1970
-        if let last = entries.last?["ts"] as? Double, ts - last < 5 {
+        if let last = entries.last, let lastTs = last["ts"] as? Double, ts - lastTs < 5,
+           (last["acct"] as? String ?? "deepseek#0") == currentAccountTag() {
             entries.removeLast()
         }
-        entries.append(["ts": ts, "total": total])
+        entries.append(["ts": ts, "total": total, "acct": currentAccountTag()])
         let cutoff = Date().addingTimeInterval(-86400 * 90).timeIntervalSince1970
         entries = entries.filter { ($0["ts"] as? Double ?? 0) > cutoff }
         entries = compactHistory(entries)
@@ -218,9 +260,15 @@ enum SharedStore {
         return arr
     }
 
-    /// 返回历史 JSON 字符串（供看板注入）
+    /// 当前账号的余额历史（旧记录没有 acct 字段，视为 DeepSeek 的第一个账号）
+    static func scopedHistoryEntries() -> [[String: Any]] {
+        let tag = currentAccountTag()
+        return historyEntries().filter { ($0["acct"] as? String ?? "deepseek#0") == tag }
+    }
+
+    /// 返回当前账号历史 JSON 字符串（供看板注入）
     static func historyJSON() -> String? {
-        guard let data = try? JSONSerialization.data(withJSONObject: historyEntries()) else { return nil }
+        guard let data = try? JSONSerialization.data(withJSONObject: scopedHistoryEntries()) else { return nil }
         return String(data: data, encoding: .utf8)
     }
 
@@ -254,6 +302,14 @@ enum L {
         "看板 · 余额+用量曲线": "Dashboard · Balance + Usage",
         "数据源": "Data Source",
         "DeepSeek 官方 API": "DeepSeek Official API",
+        "智谱 AI（GLM）": "Zhipu AI (GLM)",
+        "智谱 AI": "Zhipu AI",
+        "智谱 用量": "Zhipu Usage",
+        "智谱 用量看板": "Zhipu Dashboard",
+        "套餐": "Plan",
+        "套餐到期": "Plan Expiry",
+        "套餐有效": "Plan Active",
+        "无套餐": "No plan",
         "自定义网关（中转站）": "Custom Gateway",
         "网关地址": "Gateway URL",
         "自动刷新间隔": "Refresh Interval",
@@ -363,13 +419,19 @@ enum L {
     }
 }
 
-// MARK: - 通用余额模型（兼容 DeepSeek balance_infos 与 OpenAI 网关 data[] 两种返回）
+// MARK: - 通用余额模型（兼容 DeepSeek balance_infos、OpenAI 网关 data[] 与智谱财务总览三种返回）
 struct AccountBalance {
     var currency: String = "CNY"
     var total: String = "0"
     var granted: String?
     var toppedUp: String?
     var isAvailable: Bool = true
+    /// 智谱：当前有效套餐名（如 GLM Coding Lite）
+    var plan: String?
+    /// 智谱：套餐到期日（YYYY-MM-DD）
+    var planValidUntil: String?
+    /// 数据源标识：deepseek / zhipu / custom
+    var provider: String = "deepseek"
 }
 
 enum BalanceAPIError: LocalizedError {
@@ -418,6 +480,102 @@ struct BalanceAPI {
             ? []
             : ["\(base)/user/balance", "\(base)/v1/user/balance"]
         tryFetch(candidates, index: 0, key: key, completion: completion)
+    }
+
+    // MARK: - 智谱 AI（bigmodel.cn）
+    // 余额：GET https://open.bigmodel.cn/api/biz/account/finance-overview
+    //   → data.availableTotalBalance（现金+赠金可用余额，CNY）
+    // 套餐：GET https://open.bigmodel.cn/api/biz/subscription/list
+    //   → 取 status=VALID 的订阅（productName / valid 结束日期）
+    // 注意：智谱业务码 200 表示成功（非 0）；套餐积分（5 小时/每周）无公开接口，不在本面板展示。
+
+    private func getJSON(_ urlString: String, key: String,
+                         completion: @escaping (Result<[String: Any], Error>) -> Void) {
+        guard let url = URL(string: urlString) else {
+            completion(.failure(BalanceAPIError.invalidURL)); return
+        }
+        var req = URLRequest(url: url)
+        req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        req.timeoutInterval = 10
+        URLSession.shared.dataTask(with: req) { data, resp, err in
+            if let err = err {
+                completion(.failure(BalanceAPIError.network(err.localizedDescription))); return
+            }
+            if let http = resp as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+                if http.statusCode == 401 || http.statusCode == 403 {
+                    if let d = data,
+                       let obj = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any],
+                       let msg = obj["msg"] as? String, !msg.isEmpty {
+                        completion(.failure(BalanceAPIError.network(msg))); return
+                    }
+                    completion(.failure(BalanceAPIError.unauthorized)); return
+                }
+                completion(.failure(BalanceAPIError.http(http.statusCode))); return
+            }
+            guard let d = data else {
+                completion(.failure(BalanceAPIError.network("无响应数据"))); return
+            }
+            guard let obj = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any] else {
+                completion(.failure(BalanceAPIError.decode("非 JSON 对象"))); return
+            }
+            let code = (obj["code"] as? Int) ?? 0
+            if code == 200 || code == 0 {
+                completion(.success(obj))
+            } else {
+                let msg = obj["msg"] as? String ?? "code \(code)"
+                completion(.failure(BalanceAPIError.network(msg)))
+            }
+        }.resume()
+    }
+
+    /// 智谱：账户余额 + 当前套餐（两个请求串行，先套餐后余额，保证结果一次回调）
+    func fetchZhipu(key: String, completion: @escaping (Result<AccountBalance, Error>) -> Void) {
+        fetchZhipuPlan(key: key) { [self] plan, until in
+            getJSON("https://open.bigmodel.cn/api/biz/account/finance-overview", key: key) { result in
+                switch result {
+                case .failure(let e):
+                    completion(.failure(e))
+                case .success(let obj):
+                    var b = AccountBalance()
+                    b.provider = SharedStore.providerZhipu
+                    b.currency = "CNY"
+                    if let data = obj["data"] as? [String: Any] {
+                        let total = (data["availableTotalBalance"] as? NSNumber)?.doubleValue ?? 0
+                        b.total = String(format: "%.2f", total)
+                    } else {
+                        b.total = "0.00"
+                    }
+                    b.plan = plan
+                    b.planValidUntil = until
+                    // 有余额或有有效套餐即视为可用
+                    b.isAvailable = (Double(b.total) ?? 0) > 0.001 || plan != nil
+                    completion(.success(b))
+                }
+            }
+        }
+    }
+
+    /// 智谱套餐：订阅列表中取 VALID 的个人套餐
+    private func fetchZhipuPlan(key: String, completion: @escaping (String?, String?) -> Void) {
+        getJSON("https://open.bigmodel.cn/api/biz/subscription/list", key: key) { result in
+            guard case .success(let obj) = result,
+                  let list = obj["data"] as? [[String: Any]] else {
+                completion(nil, nil); return
+            }
+            let valid = list.first { ($0["status"] as? String) == "VALID" }
+            let name = valid?["productName"] as? String
+            var until: String?
+            if let v = valid?["valid"] as? String {
+                // "2026-12-07 10:00:00-2027-03-07 10:00:00" → 取最后一个日期
+                let re = try? NSRegularExpression(pattern: "\\d{4}-\\d{2}-\\d{2}")
+                let ms = re?.matches(in: v, range: NSRange(v.startIndex..., in: v)) ?? []
+                if let m = ms.last, let r = Range(m.range, in: v) {
+                    until = String(v[r])
+                }
+            }
+            completion(name, until)
+        }
     }
 
     private func tryFetch(_ paths: [String], index: Int, key: String,
@@ -583,6 +741,9 @@ final class FloatingPanel: NSPanel {
     // UI 元素（随模式重建）
     private var statusDot: DragView!
     private var statusLabel: DragLabel!
+    private var titleLabel: DragLabel!
+    private var grantedLabel: DragLabel!
+    private var toppedLabel: DragLabel!
     private var totalValue: DragLabel!
     private var grantedValue: DragLabel!
     private var toppedValue: DragLabel!
@@ -603,7 +764,8 @@ final class FloatingPanel: NSPanel {
         case 0: h = 88
         case 1: h = 228
         default:
-            let singleRow = (SharedStore.get("dashCards") as? [Int] ?? [0, 1, 2, 3, 4, 5]).count <= 3
+            let cardCount = (SharedStore.get("dashCards") as? [Int] ?? [0, 1, 2, 3, 4, 5]).count
+            let singleRow = cardCount <= 3
             h = hasChart ? (singleRow ? 208 : 250) : (singleRow ? 118 : 176)
         }
         let w: CGFloat = mode == 2 ? 320 : (mode == 0 ? 300 : 320)
@@ -728,18 +890,18 @@ final class FloatingPanel: NSPanel {
         // 标题 + 时间范围（分段控件）+ 置顶开关——坐标随卡片行数/曲线开关自适应（紧凑版）
         let hasChart = showChart
         let twoRows = dashboardRows() == 2
-        let titleY: CGFloat = hasChart ? (twoRows ? 220 : 180) : (twoRows ? 144 : 92)
-        let segY: CGFloat = hasChart ? (twoRows ? 216 : 176) : (twoRows ? 140 : 88)
+        let titleY: CGFloat = hasChart ? (twoRows ? 220 : 180) : (twoRows ? 158 : 92)
+        let segY: CGFloat = hasChart ? (twoRows ? 216 : 176) : (twoRows ? 152 : 88)
         let row1LabelY: CGFloat = hasChart ? (twoRows ? 184 : 150) : (twoRows ? 102 : 48)
         let row1ValY: CGFloat = hasChart ? (twoRows ? 166 : 132) : (twoRows ? 84 : 26)
         let row2LabelY: CGFloat = hasChart ? 136 : 54
         let row2ValY: CGFloat = hasChart ? 118 : 36
 
-        let title = DragLabel(labelWithString: L.t("DeepSeek 用量"))
-        title.font = .systemFont(ofSize: 10)
-        title.textColor = .secondaryLabelColor
-        title.frame = NSRect(x: 12, y: titleY, width: 140, height: 12)
-        content.addSubview(title)
+        titleLabel = DragLabel(labelWithString: panelTitleText())
+        titleLabel.font = .systemFont(ofSize: 10)
+        titleLabel.textColor = .secondaryLabelColor
+        titleLabel.frame = NSRect(x: 12, y: titleY, width: 140, height: 12)
+        content.addSubview(titleLabel)
 
         let seg = NSSegmentedControl(labels: [L.t("7天"), L.t("30天"), L.t("全部")], trackingMode: .selectOne,
                                      target: self, action: #selector(dashRangeChanged))
@@ -761,23 +923,49 @@ final class FloatingPanel: NSPanel {
             (0, "当前余额"), (1, "今日消耗"), (2, "累计消耗"),
             (3, "累计充值"), (4, "记录天数"), (5, "区间最高")
         ]
-        let specs = allSpecs.filter { dashCards.contains($0.0) }
+        let isZhipu = SharedStore.currentProvider() == SharedStore.providerZhipu
+        var specs: [(Int, String)]
+        if isZhipu {
+            // 智谱没有"今日/累计消耗/充值/预估可用"的口径，用套餐信息占位，卡片数量不变
+            specs = allSpecs.filter { dashCards.contains($0.0) }.map { spec -> (Int, String) in
+                switch spec.0 {
+                case 1: return (6, "套餐")
+                case 2: return (7, "套餐到期")
+                default: return spec
+                }
+            }.filter { $0.0 != 3 && $0.0 != 5 }
+        } else {
+            specs = allSpecs.filter { dashCards.contains($0.0) }
+        }
         let cols = min(3, max(1, specs.count))
         let cardW: CGFloat = (content.bounds.width - 24 - CGFloat(cols - 1) * 8) / CGFloat(cols)
+        // 智谱单行三卡（余额 / 套餐 / 到期）按内容宽度分配：套餐名最长，给更多空间
+        var customXs: [CGFloat] = [], customWs: [CGFloat] = []
+        if isZhipu && specs.count == 3 {
+            let total = content.bounds.width - 24 - 2 * 8
+            let w0 = total * 0.28, w1 = total * 0.44
+            let w2 = total - w0 - w1
+            customXs = [12, 12 + w0 + 8, 12 + w0 + 8 + w1 + 8]
+            customWs = [w0, w1, w2]
+        }
         for (i, spec) in specs.enumerated() {
             let col = i % cols, row = i / cols
-            let x = 12 + CGFloat(col) * (cardW + 8)
+            let x = customXs.isEmpty ? 12 + CGFloat(col) * (cardW + 8) : customXs[i]
+            let w = customWs.isEmpty ? cardW : customWs[i]
             let labelY: CGFloat = row == 0 ? row1LabelY : row2LabelY
             let valY: CGFloat = row == 0 ? row1ValY : row2ValY
             let label = DragLabel(labelWithString: L.t(spec.1))
             label.font = .systemFont(ofSize: 9)
             label.textColor = .secondaryLabelColor
-            label.frame = NSRect(x: x, y: labelY, width: cardW, height: 12)
+            label.frame = NSRect(x: x, y: labelY, width: w, height: 12)
             content.addSubview(label)
             let val = DragLabel(labelWithString: "—")
-            val.font = .monospacedDigitSystemFont(ofSize: 15, weight: .semibold)
+            let isText = spec.0 >= 6   // 套餐/到期是文字信息，字号略小以免被截断
+            val.font = isText ? .systemFont(ofSize: 11.5, weight: .semibold)
+                              : .monospacedDigitSystemFont(ofSize: 15, weight: .semibold)
             val.textColor = spec.1 == "当前余额" ? accentColor : .labelColor
-            val.frame = NSRect(x: x, y: valY, width: cardW, height: 17)
+            val.lineBreakMode = .byTruncatingTail
+            val.frame = NSRect(x: x, y: valY, width: w, height: 17)
             content.addSubview(val)
             dashboardValues[spec.1] = val
         }
@@ -803,7 +991,7 @@ final class FloatingPanel: NSPanel {
     /// 刷新看板卡片与迷你曲线（幂等，随数据更新调用）
     private func updateDashboardUI() {
         guard isDashboard else { return }
-        let entries = SharedStore.historyEntries()
+        let entries = SharedStore.scopedHistoryEntries()
         let balance = SharedStore.readBalance()
         let total = balance?["total"] as? String ?? "—"
         let sign = balance?["sign"] as? String ?? "¥"
@@ -844,6 +1032,14 @@ final class FloatingPanel: NSPanel {
         let maxV = entries.reduce(0.0) { max($0, Double($1["total"] as? String ?? "0") ?? 0) }
         dashboardValues["区间最高"]?.stringValue = maxV > 0 ? fmtMoney(maxV, sign: sign, rate: rate) : "—"
 
+        // 智谱专属卡片：套餐名 / 到期日
+        if SharedStore.currentProvider() == SharedStore.providerZhipu {
+            let plan = balance?["plan"] as? String ?? ""
+            let planUntil = balance?["planUntil"] as? String ?? ""
+            dashboardValues["套餐"]?.stringValue = plan.isEmpty ? L.t("无套餐") : plan
+            dashboardValues["套餐到期"]?.stringValue = planUntil.isEmpty ? "—" : planUntil
+        }
+
         // 迷你曲线（按范围过滤）
         let cutoff = dashRange > 0 ? Date().timeIntervalSince1970 - Double(dashRange) * 86400 : 0
         let pts: [(ts: TimeInterval, total: Double)] = entries.compactMap { e in
@@ -855,10 +1051,10 @@ final class FloatingPanel: NSPanel {
 
     private func buildMiniLayout(_ content: NSView) {
         // 标题 + 状态
-        let title = DragLabel(labelWithString: L.t("DeepSeek 用量"))
-        title.font = .systemFont(ofSize: 10)
-        title.textColor = .secondaryLabelColor
-        title.frame = NSRect(x: 12, y: 68, width: 120, height: 12)
+        titleLabel = DragLabel(labelWithString: panelTitleText())
+        titleLabel.font = .systemFont(ofSize: 10)
+        titleLabel.textColor = .secondaryLabelColor
+        titleLabel.frame = NSRect(x: 12, y: 68, width: 120, height: 12)
 
         statusDot = DragView()
         statusDot.wantsLayer = true
@@ -890,28 +1086,29 @@ final class FloatingPanel: NSPanel {
         quitButton = makeButton(L.t("隐藏"), action: #selector(hidePanel))
         quitButton.frame = NSRect(x: 254, y: 3, width: 40, height: 22)
 
-        for v in [title, statusDot!, statusLabel!, totalValue!, footerLabel!,
-                  refreshButton!, settingsButton!, quitButton!] {
+        for v in [titleLabel!, statusDot!, statusLabel!, totalValue!, footerLabel!,
+                  refreshButton!, settingsButton!, quitButton!] as [NSView] {
             content.addSubview(v)
         }
     }
 
     private func buildFullLayout(_ content: NSView) {
-        let title = DragLabel(labelWithString: "DeepSeek 用量")
-        title.font = .systemFont(ofSize: 13, weight: .semibold)
-        title.textColor = .labelColor
-        title.frame = NSRect(x: 16, y: 196, width: 160, height: 18)
+        titleLabel = DragLabel(labelWithString: panelTitleText())
+        titleLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+        titleLabel.textColor = .labelColor
+        titleLabel.frame = NSRect(x: 16, y: 196, width: 160, height: 18)
 
         statusDot = DragView()
         statusDot.wantsLayer = true
         statusDot.layer?.cornerRadius = 4
         statusDot.layer?.backgroundColor = NSColor.systemGray.cgColor
-        statusDot.frame = NSRect(x: 276, y: 200, width: 8, height: 8)
+        statusDot.frame = NSRect(x: 186, y: 200, width: 8, height: 8)
 
         statusLabel = DragLabel(labelWithString: L.t("加载中…"))
         statusLabel.font = .systemFont(ofSize: 11)
         statusLabel.textColor = .secondaryLabelColor
-        statusLabel.frame = NSRect(x: 288, y: 197, width: 80, height: 14)
+        statusLabel.alignment = .right
+        statusLabel.frame = NSRect(x: 198, y: 197, width: 46, height: 14)
 
         // 置顶小开关（右上角）
         pinButton = makePinButton()
@@ -939,6 +1136,7 @@ final class FloatingPanel: NSPanel {
         grantedLabel.font = .systemFont(ofSize: 11)
         grantedLabel.textColor = .secondaryLabelColor
         grantedLabel.frame = NSRect(x: 16, y: 128, width: 80, height: 18)
+        self.grantedLabel = grantedLabel
 
         grantedValue = DragLabel(labelWithString: "—")
         grantedValue.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
@@ -950,6 +1148,7 @@ final class FloatingPanel: NSPanel {
         toppedLabel.font = .systemFont(ofSize: 11)
         toppedLabel.textColor = .secondaryLabelColor
         toppedLabel.frame = NSRect(x: 16, y: 100, width: 80, height: 18)
+        self.toppedLabel = toppedLabel
 
         toppedValue = DragLabel(labelWithString: "—")
         toppedValue.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
@@ -969,10 +1168,10 @@ final class FloatingPanel: NSPanel {
         quitButton = makeButton(L.t("隐藏"), action: #selector(hidePanel))
         quitButton.frame = NSRect(x: 254, y: 24, width: 52, height: 24)
 
-        for v in [title, statusDot!, statusLabel!, divider,
+        for v in [titleLabel!, statusDot!, statusLabel!, divider,
                   totalLabel, totalValue!, grantedLabel, grantedValue!,
                   toppedLabel, toppedValue!, footerLabel!,
-                  refreshButton!, settingsButton!, quitButton!] {
+                  refreshButton!, settingsButton!, quitButton!] as [NSView] {
             content.addSubview(v)
         }
     }
@@ -1018,12 +1217,30 @@ final class FloatingPanel: NSPanel {
         return "https://api.deepseek.com"
     }
 
+    /// 浮窗标题按数据源切换
+    private func panelTitleText() -> String {
+        SharedStore.currentProvider() == SharedStore.providerZhipu ? L.t("智谱 用量") : L.t("DeepSeek 用量")
+    }
+
+    /// 按 provider 拉取余额：智谱走财务总览+套餐；DeepSeek/网关走 /user/balance
+    private func fetchBalanceForCurrentProvider(key: String,
+                                                completion: @escaping (Result<AccountBalance, Error>) -> Void) {
+        if SharedStore.currentProvider() == SharedStore.providerZhipu {
+            api.fetchZhipu(key: key, completion: completion)
+            return
+        }
+        guard let base = resolvedBaseURL() else {
+            completion(.failure(BalanceAPIError.invalidURL)); return
+        }
+        api.fetchBalance(baseURL: base, key: key, completion: completion)
+    }
+
     @objc func refresh() {
+        let isZhipu = SharedStore.currentProvider() == SharedStore.providerZhipu
         // 看板模式：不触碰原生控件，仅拉数据 + 更新卡片/曲线
         if isDashboard {
             guard let key = SharedStore.apiKey(), !key.isEmpty else { return }
-            guard let base = resolvedBaseURL() else { return }
-            api.fetchBalance(baseURL: base, key: key) { [weak self] result in
+            fetchBalanceForCurrentProvider(key: key) { [weak self] result in
                 DispatchQueue.main.async {
                     guard let self = self else { return }
                     if case .success(let b) = result {
@@ -1042,14 +1259,14 @@ final class FloatingPanel: NSPanel {
             footerLabel.stringValue = L.t("点「设置」填入 API Key")
             return
         }
-        guard let base = resolvedBaseURL() else {
+        if !isZhipu && resolvedBaseURL() == nil {
             statusDot.layer?.backgroundColor = NSColor.systemOrange.cgColor
             statusLabel.stringValue = L.t("未配置网关")
             footerLabel.stringValue = L.t("点「设置」填写网关地址")
             return
         }
         statusLabel.stringValue = L.t("获取中…")
-        api.fetchBalance(baseURL: base, key: key) { [weak self] result in
+        fetchBalanceForCurrentProvider(key: key) { [weak self] result in
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 switch result {
@@ -1065,36 +1282,59 @@ final class FloatingPanel: NSPanel {
     }
 
     private func apply(_ b: AccountBalance) {
+        let isZhipu = b.provider == SharedStore.providerZhipu
         let spec = moneySpec(for: b)
         let sign = spec.sign, rate = spec.rate
         let total = Double(b.total) ?? 0
         totalValue.stringValue = fmtMoney(total, sign: sign, rate: rate)
-        // 极简模式下赠送/充值控件不存在，用可选链避免崩溃
-        if let g = b.granted { grantedValue?.stringValue = fmtMoney(Double(g) ?? 0, sign: sign, rate: rate) }
-        if let t = b.toppedUp { toppedValue?.stringValue = fmtMoney(Double(t) ?? 0, sign: sign, rate: rate) }
-
-        let shown = total * rate
-        totalValue.textColor = shown < 5 ? .systemRed : (shown < 20 ? .systemOrange : accentColor)
-        grantedValue?.textColor = .secondaryLabelColor
-        toppedValue?.textColor = .secondaryLabelColor
+        if isZhipu {
+            // 智谱：两行明细改为套餐信息（无赠送/充值概念）
+            grantedLabel?.stringValue = L.t("套餐")
+            toppedLabel?.stringValue = L.t("套餐到期")
+            grantedValue?.stringValue = b.plan ?? L.t("无套餐")
+            toppedValue?.stringValue = b.planValidUntil ?? "—"
+        } else {
+            grantedLabel?.stringValue = L.t("赠送余额")
+            toppedLabel?.stringValue = L.t("充值余额")
+            // 极简模式下赠送/充值控件不存在，用可选链避免崩溃
+            if let g = b.granted { grantedValue?.stringValue = fmtMoney(Double(g) ?? 0, sign: sign, rate: rate) }
+            if let t = b.toppedUp { toppedValue?.stringValue = fmtMoney(Double(t) ?? 0, sign: sign, rate: rate) }
+        }
 
         if b.isAvailable {
             statusDot.layer?.backgroundColor = NSColor.systemGreen.cgColor
-            statusLabel.stringValue = L.t("可用")
+            statusLabel.stringValue = isZhipu && b.plan != nil ? L.t("套餐有效") : L.t("可用")
         } else {
             statusDot.layer?.backgroundColor = NSColor.systemRed.cgColor
             statusLabel.stringValue = L.t("余额不足")
         }
+        // 浮窗标题跟随数据源（切换账号后无需重建窗口也能正确显示）
+        titleLabel?.stringValue = panelTitleText()
+
+        let shown = total * rate
+        if isZhipu && b.plan != nil {
+            totalValue.textColor = accentColor      // 套餐有效时现金余额为 0 属正常，不标红
+        } else {
+            totalValue.textColor = shown < 5 ? .systemRed : (shown < 20 ? .systemOrange : accentColor)
+        }
+        grantedValue?.textColor = .secondaryLabelColor
+        toppedValue?.textColor = .secondaryLabelColor
+
         lastUpdated = Self.timeFormatter.string(from: Date())
         SharedStore.writeBalance(b, sign: sign, rate: rate)
         SharedStore.appendHistory(total: b.total)
-        checkLowBalance(total: total, sign: sign)
+        checkLowBalance(total: total, sign: sign, provider: b.provider, hasPlan: b.plan != nil)
         updateFooter()
     }
 
     /// 低余额提醒（低于阈值发一次系统通知，恢复后重置）
-    private func checkLowBalance(total: Double, sign: String) {
+    /// 智谱用户若持有有效套餐，现金余额为 0 属正常，不触发提醒
+    private func checkLowBalance(total: Double, sign: String, provider: String = "", hasPlan: Bool = false) {
         guard lowBalanceAlert else { return }
+        if provider == SharedStore.providerZhipu && hasPlan {
+            SharedStore.set("lowNotified", false)
+            return
+        }
         if total < lowBalanceThreshold {
             guard !(SharedStore.get("lowNotified") as? Bool ?? false) else { return }
             let center = UNUserNotificationCenter.current()
@@ -1411,7 +1651,7 @@ final class SettingsWindow: NSWindow {
             accountPopup.lastItem?.tag = 0
         } else {
             for (i, a) in accs.enumerated() {
-                accountPopup.addItem(withTitle: a["name"] as? String ?? "Account \(i + 1)")
+                accountPopup.addItem(withTitle: SharedStore.accountTitle(a, index: i))
                 accountPopup.lastItem?.tag = i
             }
         }
@@ -1433,7 +1673,9 @@ final class SettingsWindow: NSWindow {
         // API Key：输入框 + 显示开关右对齐
         v.addSubview(label(L.t("API Key"), NSRect(x: 20, y: 216, width: r.labelW, height: 20)))
         keyField.stringValue = apiKey
-        keyField.placeholderString = "sk-…"
+        keyField.placeholderString = SharedStore.currentProvider() == SharedStore.providerZhipu
+            ? (L.isEn ? "id.secret (Zhipu API Key)" : "id.secret（智谱 API Key）")
+            : "sk-…"
         keyField.font = .systemFont(ofSize: 12)
         keyField.frame = NSRect(x: r.cx, y: 212, width: max(100, 364 - 66 - r.cx), height: 24)
         v.addSubview(keyField)
@@ -1461,9 +1703,11 @@ final class SettingsWindow: NSWindow {
         sourcePopup.removeAllItems()
         sourcePopup.addItem(withTitle: L.t("DeepSeek 官方 API"))
         sourcePopup.lastItem?.tag = 0
-        sourcePopup.addItem(withTitle: L.t("自定义网关（中转站）"))
+        sourcePopup.addItem(withTitle: L.t("智谱 AI（GLM）"))
         sourcePopup.lastItem?.tag = 1
-        sourcePopup.selectItem(withTag: sourceType)
+        sourcePopup.addItem(withTitle: L.t("自定义网关（中转站）"))
+        sourcePopup.lastItem?.tag = 2
+        sourcePopup.selectItem(withTag: self.tagForProvider(SharedStore.currentProvider()))
         if sourcePopup.selectedTag() == -1 { sourcePopup.selectItem(withTag: 0) }
         sourcePopup.target = self
         sourcePopup.action = #selector(sourceChanged)
@@ -1474,7 +1718,7 @@ final class SettingsWindow: NSWindow {
         baseField.placeholderString = L.isEn ? "https://your-gateway.com (optional /v1)" : "https://your-gateway.com（可选 /v1）"
         baseField.font = .systemFont(ofSize: 12)
         baseField.frame = NSRect(x: r.cx, y: 80, width: 364 - r.cx, height: 24)
-        baseField.isEnabled = (sourcePopup.selectedTag() == 1)
+        baseField.isEnabled = (sourcePopup.selectedTag() == 2)
         v.addSubview(baseField)
 
         v.addSubview(label(L.t("自动刷新间隔"), NSRect(x: 20, y: 40, width: r.labelW, height: 20)))
@@ -1666,16 +1910,22 @@ final class SettingsWindow: NSWindow {
         if let a = SharedStore.currentAccount(), let k = a["key"] as? String {
             keyField.stringValue = k
         }
+        // 数据源选择跟随当前账号
+        sourcePopup.selectItem(withTag: tagForProvider(SharedStore.currentProvider()))
+        baseField.isEnabled = (sourcePopup.selectedTag() == 2)
+        keyField.placeholderString = sourcePopup.selectedTag() == 1
+            ? (L.isEn ? "id.secret (Zhipu API Key)" : "id.secret（智谱 API Key）")
+            : "sk-…"
     }
 
     @objc private func addAccountAction() {
         let key = keyField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        SharedStore.addAccount(key: key)
+        SharedStore.addAccount(key: key, provider: providerForTag(sourcePopup.selectedTag()))
         // 刷新账号下拉
         accountPopup.removeAllItems()
         let accs = SharedStore.accounts()
         for (i, a) in accs.enumerated() {
-            accountPopup.addItem(withTitle: a["name"] as? String ?? "Account \(i + 1)")
+            accountPopup.addItem(withTitle: SharedStore.accountTitle(a, index: i))
             accountPopup.lastItem?.tag = i
         }
         accountPopup.selectItem(withTag: SharedStore.accountIndex())
@@ -1690,7 +1940,7 @@ final class SettingsWindow: NSWindow {
             accountPopup.lastItem?.tag = 0
         } else {
             for (i, a) in accs.enumerated() {
-                accountPopup.addItem(withTitle: a["name"] as? String ?? "Account \(i + 1)")
+                accountPopup.addItem(withTitle: SharedStore.accountTitle(a, index: i))
                 accountPopup.lastItem?.tag = i
             }
         }
@@ -1700,7 +1950,7 @@ final class SettingsWindow: NSWindow {
 
     /// 导出历史数据为 CSV 到 ~/Downloads
     @objc private func exportCSV() {
-        let entries = SharedStore.historyEntries()
+        let entries = SharedStore.scopedHistoryEntries()
         var csv = "timestamp,balance\n"
         let df = DateFormatter()
         df.dateFormat = "yyyy-MM-dd HH:mm:ss"
@@ -1731,7 +1981,18 @@ final class SettingsWindow: NSWindow {
     }
 
     @objc private func sourceChanged() {
-        baseField.isEnabled = (sourcePopup.selectedTag() == 1)
+        baseField.isEnabled = (sourcePopup.selectedTag() == 2)
+        // Key 输入框提示随数据源变化
+        keyField.placeholderString = sourcePopup.selectedTag() == 1
+            ? (L.isEn ? "id.secret (Zhipu API Key)" : "id.secret（智谱 API Key）")
+            : "sk-…"
+    }
+
+    private func tagForProvider(_ p: String) -> Int {
+        p == SharedStore.providerZhipu ? 1 : (p == SharedStore.providerCustom ? 2 : 0)
+    }
+    private func providerForTag(_ t: Int) -> String {
+        t == 1 ? SharedStore.providerZhipu : (t == 2 ? SharedStore.providerCustom : SharedStore.providerDeepSeek)
     }
 
     @objc private func opacityChanged() {
@@ -1772,7 +2033,11 @@ final class SettingsWindow: NSWindow {
         var base = baseField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         while base.hasSuffix("/") { base.removeLast() }
         SharedStore.set("displayMode", mode >= 0 ? mode : 0)
-        SharedStore.set("sourceType", source >= 0 ? source : 0)
+        let src = source >= 0 ? source : 0
+        let provider = providerForTag(src)
+        SharedStore.setCurrentProvider(provider)
+        SharedStore.set("sourceType", provider == SharedStore.providerCustom ? 1 : 0)
+        SharedStore.set("provider", provider)
         SharedStore.set("baseURL", base)
         let tag = intervalPopup.selectedTag()
         SharedStore.set("refreshInterval", tag > 0 ? tag : 60)
@@ -1817,7 +2082,7 @@ final class DashboardWindow: NSWindow, WKNavigationDelegate, WKScriptMessageHand
         super.init(contentRect: NSRect(x: 0, y: 0, width: 760, height: 520),
                    styleMask: [.titled, .closable, .resizable],
                    backing: .buffered, defer: false)
-        title = L.t("DeepSeek 用量看板")
+        title = SharedStore.currentProvider() == SharedStore.providerZhipu ? L.t("智谱 用量看板") : L.t("DeepSeek 用量看板")
         isReleasedWhenClosed = false
         minSize = NSSize(width: 560, height: 380)
         appearance = NSAppearance(named: .darkAqua)
@@ -1875,7 +2140,10 @@ final class DashboardWindow: NSWindow, WKNavigationDelegate, WKScriptMessageHand
         let sign = balance?["sign"] as? String ?? "¥"
         let accent = AccentTheme(rawValue: SharedStore.get("accent") as? Int ?? 0)?.hex ?? "#0A84FF"
         let lang = L.lang
-        let js = "window.__DS_DATA__ = { sign: \(Self.jsStr(sign)), current: \(Self.jsStr(total)), topped: \(Self.jsStr(topped)), entries: \(entries), accent: \(Self.jsStr(accent)), lang: \(Self.jsStr(lang)) }; console.log('injected', JSON.stringify(window.__DS_DATA__).slice(0, 300)); renderDashboard();"
+        let provider = balance?["provider"] as? String ?? "deepseek"
+        let plan = balance?["plan"] as? String ?? ""
+        let planUntil = balance?["planUntil"] as? String ?? ""
+        let js = "window.__DS_DATA__ = { sign: \(Self.jsStr(sign)), current: \(Self.jsStr(total)), topped: \(Self.jsStr(topped)), entries: \(entries), accent: \(Self.jsStr(accent)), lang: \(Self.jsStr(lang)), provider: \(Self.jsStr(provider)), plan: \(Self.jsStr(plan)), planUntil: \(Self.jsStr(planUntil)) }; console.log('injected', JSON.stringify(window.__DS_DATA__).slice(0, 300)); renderDashboard();"
         webView?.evaluateJavaScript(js, completionHandler: nil)
     }
 

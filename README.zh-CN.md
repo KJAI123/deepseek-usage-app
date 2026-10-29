@@ -1,7 +1,7 @@
 # DeepSeek 用量面板（DeepSeek Usage Panel）
 
-> 常驻屏幕角落的 DeepSeek API 余额悬浮窗 + 桌面小组件 + 用量看板。
-> 极简显示、实时刷新、支持官方 API 与自建网关，macOS / Windows 双端开源。
+> 常驻屏幕角落的 **DeepSeek / 智谱 AI（GLM）** 余额悬浮窗 + 桌面小组件 + 用量看板。
+> 极简显示、实时刷新、支持官方 API、智谱 Coding Plan 与自建网关，macOS / Windows 双端开源。
 
 English | [简体中文](./README.zh-CN.md)
 
@@ -24,6 +24,7 @@ English | [简体中文](./README.zh-CN.md)
 | 开机自启 | ✅ | 🚧 规划中 |
 | 自定义网关（new-api / one-api） | ✅ | ✅ |
 | 低余额提醒 | ✅ | 🚧 规划中 |
+| 智谱 AI（GLM）余额 + Coding Plan | ✅ | 🚧 规划中 |
 
 ## 快速开始
 
@@ -43,6 +44,17 @@ English | [简体中文](./README.zh-CN.md)
 | ![设置](docs/screenshots/settings-general.png) | ![悬浮窗](docs/screenshots/panel-dashboard-mode.png) | ![看板](docs/screenshots/dashboard.png) |
 
 > 余额是**账号级**而非 Key 级——同一账号任意 Key 查到的都是同一个总余额。多账号可用设置里的 **+ / −** 按钮切换。
+
+### 智谱 AI（GLM）支持
+
+在**设置 → 数据源**中选择 **智谱 AI（GLM）**，粘贴智谱 API Key（`id.secret` 格式，在 [bigmodel.cn](https://bigmodel.cn/usercenter/proj-mgmt/apikeys) 创建）。悬浮窗会显示：
+
+- **可用余额**（现金 + 赠送，人民币），来自财务总览接口
+- **套餐**名称与**套餐到期**日（如 `GLM Coding Lite` / `2027-03-07`），来自当前有效订阅
+
+账号之间完全隔离：每个账号各自记录余额历史，DeepSeek 与智谱来回切换不会再出现"突然消耗几百块"的假数据。
+
+> 说明：智谱的套餐积分（5 小时 / 每周额度）没有开放的查询接口（该路径被网关拦截），因此应用展示套餐状态与到期日，而不是猜一个积分数字。
 
 ### macOS（macOS 13+）
 

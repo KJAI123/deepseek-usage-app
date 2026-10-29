@@ -24,7 +24,7 @@
 | Launch at login | ✅ | 🚧 Planned |
 | Custom gateway (new-api / one-api) | ✅ | ✅ |
 | Low-balance alert | ✅ | 🚧 Planned |
-| Zhipu AI (GLM) balance + Coding Plan support | ✅ | 🚧 Planned |
+| Zhipu AI (GLM) balance + Coding Plan support | ✅ | ✅ |
 
 ## Quick Start
 

@@ -52,6 +52,7 @@
     <label>数据源</label>
     <select id="source">
       <option value="https://api.deepseek.com">DeepSeek 官方</option>
+      <option value="zhipu">智谱 AI（GLM）</option>
       <option value="custom">自定义网关（new-api / one-api）</option>
     </select>
   </div>
@@ -97,7 +98,10 @@
   async function init() {
     const cfg = await invoke("get_config");
     $("key").value = cfg.api_key || "";
-    if (cfg.base_url && cfg.base_url !== "https://api.deepseek.com") {
+    if ((cfg.provider || "") === "zhipu") {
+      $("source").value = "zhipu";
+      $("key").placeholder = "id.secret（智谱 API Key）";
+    } else if (cfg.base_url && cfg.base_url !== "https://api.deepseek.com") {
       $("source").value = "custom";
       $("base").value = cfg.base_url;
       $("baseWrap").style.display = "block";
@@ -108,18 +112,23 @@
   }
 
   $("source").addEventListener("change", () => {
-    $("baseWrap").style.display = $("source").value === "custom" ? "block" : "none";
+    const v = $("source").value;
+    $("baseWrap").style.display = v === "custom" ? "block" : "none";
+    $("key").placeholder = v === "zhipu" ? "id.secret（智谱 API Key）" : "粘贴你的 DeepSeek API Key";
   });
 
   $("save").addEventListener("click", async () => {
-    const custom = $("source").value === "custom";
+    const src = $("source").value;
+    const custom = src === "custom";
     const base = custom ? ($("base").value.trim() || "https://api.deepseek.com") : "https://api.deepseek.com";
+    const provider = src === "zhipu" ? "zhipu" : (custom ? "custom" : "deepseek");
     await invoke("save_config", {
       cfg: {
         api_key: $("key").value.trim(),
         base_url: base,
         refresh_interval: parseInt($("interval").value, 10),
-        display_currency: parseInt($("currency").value, 10)
+        display_currency: parseInt($("currency").value, 10),
+        provider: provider
       }
     });
     await invoke("set_always_on_top", { enabled: $("top").checked });

@@ -44,7 +44,7 @@
 <body>
 <div class="panel" data-tauri-drag-region>
   <div class="row">
-    <span class="title">DeepSeek 余额</span>
+    <span class="title" id="title">DeepSeek 余额</span>
     <span class="dot" id="dot"></span>
   </div>
   <div class="balance dim" id="balance">—</div>
@@ -95,8 +95,13 @@
     const spec = moneySpec(b);
     bal.textContent = fmtMoney(b.total, spec.sign, spec.rate);
     bal.classList.remove("dim");
+    const isZhipu = (b.provider || "") === "zhipu";
+    $("title").textContent = isZhipu ? "智谱 余额" : "DeepSeek 余额";
     const t = b.updated_at ? new Date(b.updated_at * 1000).toLocaleTimeString("zh-CN") : "—";
-    $("foot").textContent = "更新于 " + t;
+    // 智谱：套餐名 + 到期日；DeepSeek：更新时间
+    $("foot").textContent = isZhipu && b.plan
+      ? (b.plan + " · 到期 " + (b.plan_until || "—"))
+      : "更新于 " + t;
   }
 
   async function refreshNow() {

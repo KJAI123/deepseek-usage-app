@@ -19,6 +19,9 @@ struct Config {
     /// 显示货币：0=自动跟随 API，1=人民币，2=美元（按汇率换算显示）
     #[serde(default)]
     display_currency: u64,
+    /// 数据源：deepseek / zhipu / custom
+    #[serde(default)]
+    provider: String,
 }
 
 fn default_true() -> bool {
@@ -37,6 +40,11 @@ impl Config {
             refresh_interval: if self.refresh_interval == 0 { 60 } else { self.refresh_interval },
             always_on_top: self.always_on_top,
             display_currency: if self.display_currency > 2 { 0 } else { self.display_currency },
+            provider: match self.provider.trim() {
+                "zhipu" => "zhipu".to_string(),
+                "custom" => "custom".to_string(),
+                _ => "deepseek".to_string(),
+            },
         }
     }
 }
@@ -52,6 +60,12 @@ struct Balance {
     /// API 返回币种（如 CNY / USD），供"自动跟随"显示
     #[serde(default)]
     currency: String,
+    #[serde(default)]
+    provider: String,
+    #[serde(default)]
+    plan: String,
+    #[serde(default)]
+    plan_until: String,
 }
 
 // ---------- 本地数据（%APPDATA%/deepseek-usage-app） ----------
@@ -110,20 +124,29 @@ fn get_balance_cached() -> Balance {
 
 #[tauri::command]
 fn get_history() -> Vec<serde_json::Value> {
-    read_json("history.json").unwrap_or_default()
+    let provider = get_config().normalized().provider;
+    let entries: Vec<serde_json::Value> = read_json("history.json").unwrap_or_default();
+    entries
+        .into_iter()
+        .filter(|e| {
+            let acct = e.get("acct").and_then(|v| v.as_str()).unwrap_or("deepseek");
+            acct == provider
+        })
+        .collect()
 }
 
-fn append_history(total: &str) {
+fn append_history(total: &str, provider: &str) {
     let mut entries: Vec<serde_json::Value> = read_json("history.json").unwrap_or_default();
     let ts = now_ts();
     if let Some(last) = entries.last() {
         if let Some(last_ts) = last.get("ts").and_then(|v| v.as_u64()) {
-            if ts - last_ts < 5 {
+            let last_provider = last.get("acct").and_then(|v| v.as_str()).unwrap_or("deepseek");
+            if ts - last_ts < 5 && last_provider == provider {
                 entries.pop();
             }
         }
     }
-    entries.push(serde_json::json!({ "ts": ts, "total": total }));
+    entries.push(serde_json::json!({ "ts": ts, "total": total, "acct": provider }));
     // 保留近 90 天 / 最多 1000 条
     let cutoff = now_ts().saturating_sub(86400 * 90);
     entries.retain(|e| e.get("ts").and_then(|v| v.as_u64()).unwrap_or(0) > cutoff);
@@ -155,6 +178,10 @@ fn refresh() -> Balance {
             }
         }
     };
+
+    if cfg.provider == "zhipu" {
+        return refresh_zhipu(&client, &cfg);
+    }
 
     // 自动探测 {base}/user/balance 与 {base}/v1/user/balance
     let candidates = vec![
@@ -228,9 +255,110 @@ fn refresh() -> Balance {
         error: None,
         updated_at: now_ts(),
         currency: currency.to_uppercase(),
+        provider: cfg.provider.clone(),
+        plan: String::new(),
+        plan_until: String::new(),
     };
     write_json("balance.json", &b);
-    append_history(&b.total);
+    append_history(&b.total, &b.provider);
+    b
+}
+
+/// 智谱 AI（GLM）：可用余额 + Coding Plan 套餐名/到期日
+/// 业务码约定：code == 200 才算成功（不是 0）
+fn refresh_zhipu(client: &reqwest::blocking::Client, cfg: &Config) -> Balance {
+    let mut last_err = "请求失败".to_string();
+
+    // 1) 财务总览：data.availableTotalBalance
+    let overview = client
+        .get("https://open.bigmodel.cn/api/biz/account/finance-overview")
+        .bearer_auth(&cfg.api_key)
+        .send();
+    let mut total: Option<f64> = None;
+    match overview {
+        Ok(resp) => {
+            let status = resp.status();
+            if let Ok(v) = resp.json::<serde_json::Value>() {
+                let code = v.get("code").and_then(|x| x.as_i64()).unwrap_or(-1);
+                if code == 200 {
+                    total = v
+                        .get("data")
+                        .and_then(|d| d.get("availableTotalBalance"))
+                        .and_then(|x| x.as_f64());
+                } else {
+                    last_err = v
+                        .get("msg")
+                        .and_then(|x| x.as_str())
+                        .unwrap_or("智谱接口返回异常")
+                        .to_string();
+                }
+            } else {
+                last_err = format!("HTTP {}", status);
+            }
+        }
+        Err(e) => last_err = e.to_string(),
+    }
+
+    let total = match total {
+        Some(t) => t,
+        None => {
+            return Balance {
+                provider: "zhipu".into(),
+                error: Some(last_err),
+                updated_at: now_ts(),
+                ..Default::default()
+            }
+        }
+    };
+
+    // 2) 订阅列表：取 status == VALID 的套餐
+    let mut plan = String::new();
+    let mut plan_until = String::new();
+    if let Ok(resp) = client
+        .get("https://open.bigmodel.cn/api/biz/subscription/list")
+        .bearer_auth(&cfg.api_key)
+        .send()
+    {
+        if let Ok(v) = resp.json::<serde_json::Value>() {
+            if v.get("code").and_then(|x| x.as_i64()).unwrap_or(-1) == 200 {
+                if let Some(list) = v.get("data").and_then(|x| x.as_array()) {
+                    for item in list {
+                        if item.get("status").and_then(|x| x.as_str()) == Some("VALID") {
+                            plan = item
+                                .get("productName")
+                                .and_then(|x| x.as_str())
+                                .unwrap_or("")
+                                .to_string();
+                            // valid 形如 "2026-12-07 10:00:00-2027-03-07 10:00:00"，取最后一个日期
+                            if let Some(valid) = item.get("valid").and_then(|x| x.as_str()) {
+                                let dates: Vec<&str> =
+                                    valid.split(|c: char| !c.is_ascii_digit() && c != '-').filter(|s| s.len() == 10).collect();
+                                if let Some(d) = dates.last() {
+                                    plan_until = d.to_string();
+                                }
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let b = Balance {
+        total: format!("{:.2}", total),
+        granted: None,
+        topped: None,
+        available: true,
+        error: None,
+        updated_at: now_ts(),
+        currency: "CNY".into(),
+        provider: "zhipu".into(),
+        plan,
+        plan_until,
+    };
+    write_json("balance.json", &b);
+    append_history(&b.total, &b.provider);
     b
 }
 

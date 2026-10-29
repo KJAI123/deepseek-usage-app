@@ -24,7 +24,7 @@ English | [简体中文](./README.zh-CN.md)
 | 开机自启 | ✅ | 🚧 规划中 |
 | 自定义网关（new-api / one-api） | ✅ | ✅ |
 | 低余额提醒 | ✅ | 🚧 规划中 |
-| 智谱 AI（GLM）余额 + Coding Plan | ✅ | 🚧 规划中 |
+| 智谱 AI（GLM）余额 + Coding Plan | ✅ | ✅ |
 
 ## 快速开始
 

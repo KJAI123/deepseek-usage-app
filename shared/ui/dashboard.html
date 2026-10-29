@@ -178,7 +178,10 @@ function fetchData(cb) {
       window.__TAURI__.core.invoke("get_history")
     ]).then(function (res) {
       const b = res[0] || {};
-      cb({ sign: "¥", current: b.total || "", entries: res[1] || [] });
+      cb({
+        sign: "¥", current: b.total || "", entries: res[1] || [],
+        provider: b.provider || "deepseek", plan: b.plan || "", planUntil: b.plan_until || ""
+      });
     }).catch(function () { cb({ sign: "¥", current: "", entries: [] }); });
     return;
   }

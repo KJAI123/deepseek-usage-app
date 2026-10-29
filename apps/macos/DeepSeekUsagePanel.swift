@@ -98,6 +98,14 @@ enum SharedStore {
             "provider": b.provider,
             "plan": b.plan ?? "",
             "planUntil": b.planValidUntil ?? "",
+            "q5Total": b.quota5Total ?? 0,
+            "q5Used": b.quota5Used ?? 0,
+            "q5Pct": b.quota5Percent ?? 0,
+            "q5Reset": b.quota5Reset ?? "",
+            "qwTotal": b.quotaWeekTotal ?? 0,
+            "qwUsed": b.quotaWeekUsed ?? 0,
+            "qwPct": b.quotaWeekPercent ?? 0,
+            "qwReset": b.quotaWeekReset ?? "",
             "updatedAt": Date().timeIntervalSince1970,
         ]
         write("balance.json", payload)
@@ -310,6 +318,10 @@ enum L {
         "套餐到期": "Plan Expiry",
         "套餐有效": "Plan Active",
         "无套餐": "No plan",
+        "5 小时额度": "5-hour quota",
+        "本周额度": "Weekly quota",
+        "本周用尽": "Weekly limit hit",
+        "到期 %@": "expires %@",
         "自定义网关（中转站）": "Custom Gateway",
         "网关地址": "Gateway URL",
         "自动刷新间隔": "Refresh Interval",
@@ -430,6 +442,16 @@ struct AccountBalance {
     var plan: String?
     /// 智谱：套餐到期日（YYYY-MM-DD）
     var planValidUntil: String?
+    /// 智谱：Coding Plan 额度（5 小时窗口）
+    var quota5Total: Int?
+    var quota5Used: Int?
+    var quota5Percent: Int?
+    var quota5Reset: String?
+    /// 智谱：Coding Plan 额度（每周窗口）
+    var quotaWeekTotal: Int?
+    var quotaWeekUsed: Int?
+    var quotaWeekPercent: Int?
+    var quotaWeekReset: String?
     /// 数据源标识：deepseek / zhipu / custom
     var provider: String = "deepseek"
 }
@@ -550,9 +572,55 @@ struct BalanceAPI {
                     b.planValidUntil = until
                     // 有余额或有有效套餐即视为可用
                     b.isAvailable = (Double(b.total) ?? 0) > 0.001 || plan != nil
-                    completion(.success(b))
+                    fetchZhipuQuota(key: key) { quota in
+                        if let quota = quota {
+                            b.quota5Total = quota.0
+                            b.quota5Used = quota.1
+                            b.quota5Percent = quota.2
+                            b.quota5Reset = quota.3
+                            b.quotaWeekTotal = quota.4
+                            b.quotaWeekUsed = quota.5
+                            b.quotaWeekPercent = quota.6
+                            b.quotaWeekReset = quota.7
+                        }
+                        completion(.success(b))
+                    }
                 }
             }
+        }
+    }
+
+    /// 智谱 Coding Plan 额度：/api/monitor/usage/quota/limit
+    /// 返回 (5h总量, 5h已用, 5h百分比, 5h重置, 周总量, 周已用, 周百分比, 周重置)
+    private func fetchZhipuQuota(key: String,
+                                 completion: @escaping ((Int, Int, Int, String, Int, Int, Int, String)?) -> Void) {
+        getJSON("https://open.bigmodel.cn/api/monitor/usage/quota/limit", key: key) { result in
+            guard case .success(let obj) = result,
+                  let data = obj["data"] as? [String: Any],
+                  let limits = data["limits"] as? [[String: Any]] else {
+                completion(nil); return
+            }
+            // 5 小时窗口与每周窗口都是 CREDIT_LIMIT，按总量区分：小的为 5 小时
+            var parsed: [(total: Int, used: Int, pct: Int, reset: String)] = []
+            for item in limits {
+                let total = (item["usage"] as? NSNumber)?.intValue ?? 0
+                let used = (item["currentValue"] as? NSNumber)?.intValue ?? 0
+                let pct = (item["percentage"] as? NSNumber)?.intValue ?? 0
+                var reset = ""
+                if let ms = (item["nextResetTime"] as? NSNumber)?.doubleValue, ms > 0 {
+                    let d = Date(timeIntervalSince1970: ms / 1000)
+                    let f = DateFormatter()
+                    f.locale = Locale(identifier: "zh_CN")
+                    f.dateFormat = "MM-dd HH:mm"
+                    reset = f.string(from: d)
+                }
+                if total > 0 { parsed.append((total, used, pct, reset)) }
+            }
+            guard parsed.count >= 2 else { completion(nil); return }
+            parsed.sort { $0.total < $1.total }
+            let five = parsed[0], week = parsed[1]
+            completion((five.total, five.used, five.pct, five.reset,
+                        week.total, week.used, week.pct, week.reset))
         }
     }
 
@@ -741,6 +809,7 @@ final class FloatingPanel: NSPanel {
     // UI 元素（随模式重建）
     private var statusDot: DragView!
     private var statusLabel: DragLabel!
+    private var totalLabel: DragLabel!
     private var titleLabel: DragLabel!
     private var grantedLabel: DragLabel!
     private var toppedLabel: DragLabel!
@@ -929,11 +998,13 @@ final class FloatingPanel: NSPanel {
             // 智谱没有"今日/累计消耗/充值/预估可用"的口径，用套餐信息占位，卡片数量不变
             specs = allSpecs.filter { dashCards.contains($0.0) }.map { spec -> (Int, String) in
                 switch spec.0 {
-                case 1: return (6, "套餐")
-                case 2: return (7, "套餐到期")
+                case 0: return (0, "5 小时额度")
+                case 1: return (1, "本周额度")
+                case 2: return (2, "套餐")
                 default: return spec
                 }
-            }.filter { $0.0 != 3 && $0.0 != 5 }
+            }.filter { $0.0 == 0 || $0.0 == 1 || $0.0 == 2 }
+            if specs.isEmpty { specs = [(0, "5 小时额度")] }
         } else {
             specs = allSpecs.filter { dashCards.contains($0.0) }
         }
@@ -943,7 +1014,7 @@ final class FloatingPanel: NSPanel {
         var customXs: [CGFloat] = [], customWs: [CGFloat] = []
         if isZhipu && specs.count == 3 {
             let total = content.bounds.width - 24 - 2 * 8
-            let w0 = total * 0.28, w1 = total * 0.44
+            let w0 = total * 0.22, w1 = total * 0.24
             let w2 = total - w0 - w1
             customXs = [12, 12 + w0 + 8, 12 + w0 + 8 + w1 + 8]
             customWs = [w0, w1, w2]
@@ -960,7 +1031,7 @@ final class FloatingPanel: NSPanel {
             label.frame = NSRect(x: x, y: labelY, width: w, height: 12)
             content.addSubview(label)
             let val = DragLabel(labelWithString: "—")
-            let isText = spec.0 >= 6   // 套餐/到期是文字信息，字号略小以免被截断
+            let isText = spec.0 >= 6 || spec.1 == "套餐"   // 套餐名是文字，字号略小以免被截断
             val.font = isText ? .systemFont(ofSize: 11.5, weight: .semibold)
                               : .monospacedDigitSystemFont(ofSize: 15, weight: .semibold)
             val.textColor = spec.1 == "当前余额" ? accentColor : .labelColor
@@ -1032,12 +1103,18 @@ final class FloatingPanel: NSPanel {
         let maxV = entries.reduce(0.0) { max($0, Double($1["total"] as? String ?? "0") ?? 0) }
         dashboardValues["区间最高"]?.stringValue = maxV > 0 ? fmtMoney(maxV, sign: sign, rate: rate) : "—"
 
-        // 智谱专属卡片：套餐名 / 到期日
+        // 智谱专属卡片：5 小时额度 / 本周额度 / 套餐
         if SharedStore.currentProvider() == SharedStore.providerZhipu {
             let plan = balance?["plan"] as? String ?? ""
-            let planUntil = balance?["planUntil"] as? String ?? ""
+            let q5 = (balance?["q5Pct"] as? NSNumber)?.intValue
+            let qw = (balance?["qwPct"] as? NSNumber)?.intValue
+            let rem5 = q5.map { max(0, 100 - $0) }
+            let remW = qw.map { max(0, 100 - $0) }
+            dashboardValues["5 小时额度"]?.stringValue = rem5.map { String($0) + "%" } ?? "—"
+            dashboardValues["本周额度"]?.stringValue = remW.map { String($0) + "%" } ?? "—"
             dashboardValues["套餐"]?.stringValue = plan.isEmpty ? L.t("无套餐") : plan
-            dashboardValues["套餐到期"]?.stringValue = planUntil.isEmpty ? "—" : planUntil
+            if let r = rem5 { dashboardValues["5 小时额度"]?.textColor = r == 0 ? .systemRed : (r < 10 ? .systemOrange : accentColor) }
+            if let r = remW { dashboardValues["本周额度"]?.textColor = r == 0 ? .systemRed : (r < 10 ? .systemOrange : .labelColor) }
         }
 
         // 迷你曲线（按范围过滤）
@@ -1121,7 +1198,7 @@ final class FloatingPanel: NSPanel {
         divider.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.12).cgColor
         divider.frame = NSRect(x: 16, y: 184, width: 288, height: 1)
 
-        let totalLabel = DragLabel(labelWithString: L.t("总余额"))
+        totalLabel = DragLabel(labelWithString: L.t("总余额"))
         totalLabel.font = .systemFont(ofSize: 11)
         totalLabel.textColor = .secondaryLabelColor
         totalLabel.frame = NSRect(x: 16, y: 156, width: 80, height: 18)
@@ -1288,11 +1365,21 @@ final class FloatingPanel: NSPanel {
         let total = Double(b.total) ?? 0
         totalValue.stringValue = fmtMoney(total, sign: sign, rate: rate)
         if isZhipu {
-            // 智谱：两行明细改为套餐信息（无赠送/充值概念）
-            grantedLabel?.stringValue = L.t("套餐")
-            toppedLabel?.stringValue = L.t("套餐到期")
-            grantedValue?.stringValue = b.plan ?? L.t("无套餐")
-            toppedValue?.stringValue = b.planValidUntil ?? "—"
+            // 智谱 Coding Plan：主指标是套餐额度（现金余额通常为 0，降为 footer 显示）
+            let p5 = b.quota5Percent
+            let pw = b.quotaWeekPercent
+            let rem5 = p5.map { max(0, 100 - $0) }
+            let remW = pw.map { max(0, 100 - $0) }
+            if isMini {
+                totalValue.stringValue = rem5.map { "剩 " + String($0) + "%" } ?? "—"
+            } else {
+                totalLabel?.stringValue = L.t("5 小时额度")
+                totalValue.stringValue = rem5.map { String($0) + "%" } ?? "—"
+            }
+            grantedLabel?.stringValue = L.t("本周额度")
+            grantedValue?.stringValue = remW.map { String($0) + "%" } ?? "—"
+            toppedLabel?.stringValue = L.t("套餐")
+            toppedValue?.stringValue = b.plan ?? L.t("无套餐")
         } else {
             grantedLabel?.stringValue = L.t("赠送余额")
             toppedLabel?.stringValue = L.t("充值余额")
@@ -1301,7 +1388,10 @@ final class FloatingPanel: NSPanel {
             if let t = b.toppedUp { toppedValue?.stringValue = fmtMoney(Double(t) ?? 0, sign: sign, rate: rate) }
         }
 
-        if b.isAvailable {
+        if isZhipu, let pw = b.quotaWeekPercent, pw >= 100 {
+            statusDot.layer?.backgroundColor = NSColor.systemRed.cgColor
+            statusLabel.stringValue = L.t("本周用尽")
+        } else if b.isAvailable {
             statusDot.layer?.backgroundColor = NSColor.systemGreen.cgColor
             statusLabel.stringValue = isZhipu && b.plan != nil ? L.t("套餐有效") : L.t("可用")
         } else {
@@ -1312,12 +1402,30 @@ final class FloatingPanel: NSPanel {
         titleLabel?.stringValue = panelTitleText()
 
         let shown = total * rate
-        if isZhipu && b.plan != nil {
+        if isZhipu {
+            // 按 5 小时窗口剩余额度染色：<10% 橙、0 红
+            let rem = b.quota5Percent.map { max(0, 100 - $0) }
+            if let rem = rem, rem == 0 {
+                totalValue.textColor = .systemRed
+            } else if let rem = rem, rem < 10 {
+                totalValue.textColor = .systemOrange
+            } else {
+                totalValue.textColor = accentColor
+            }
+        } else if isZhipu && b.plan != nil {
             totalValue.textColor = accentColor      // 套餐有效时现金余额为 0 属正常，不标红
         } else {
             totalValue.textColor = shown < 5 ? .systemRed : (shown < 20 ? .systemOrange : accentColor)
         }
-        grantedValue?.textColor = .secondaryLabelColor
+        if isZhipu {
+            // 额度用尽标红、剩余紧张标橙，其余保持次级色
+            if let pw = b.quotaWeekPercent {
+                let rem = max(0, 100 - pw)
+                grantedValue?.textColor = rem == 0 ? .systemRed : (rem < 10 ? .systemOrange : .secondaryLabelColor)
+            }
+        } else {
+            grantedValue?.textColor = .secondaryLabelColor
+        }
         toppedValue?.textColor = .secondaryLabelColor
 
         lastUpdated = Self.timeFormatter.string(from: Date())
@@ -1361,6 +1469,19 @@ final class FloatingPanel: NSPanel {
         guard footerLabel != nil else { return }
         var t = "等待获取…"
         if !lastUpdated.isEmpty { t = L.t("更新于 %@").replacingOccurrences(of: "%@", with: lastUpdated) }
+        if SharedStore.currentProvider() == SharedStore.providerZhipu {
+            let bal = SharedStore.readBalance()
+            let cash = bal?["total"] as? String ?? "0.00"
+            let until = bal?["planUntil"] as? String ?? ""
+            var parts = ["¥" + cash]
+            if !until.isEmpty { parts.append(L.t("到期 %@").replacingOccurrences(of: "%@", with: until)) }
+            t = parts.joined(separator: " · ")
+            if isMini {
+                // 极简窗口窄，底部按钮会压到文字：只留余额与到期，不追加刷新倒计时
+                footerLabel.stringValue = t
+                return
+            }
+        }
         t += (L.isEn ? " · %@s" : " · %@s 后刷新").replacingOccurrences(of: "%@", with: String(secondsLeft))
         footerLabel.stringValue = t
     }
@@ -2143,7 +2264,9 @@ final class DashboardWindow: NSWindow, WKNavigationDelegate, WKScriptMessageHand
         let provider = balance?["provider"] as? String ?? "deepseek"
         let plan = balance?["plan"] as? String ?? ""
         let planUntil = balance?["planUntil"] as? String ?? ""
-        let js = "window.__DS_DATA__ = { sign: \(Self.jsStr(sign)), current: \(Self.jsStr(total)), topped: \(Self.jsStr(topped)), entries: \(entries), accent: \(Self.jsStr(accent)), lang: \(Self.jsStr(lang)), provider: \(Self.jsStr(provider)), plan: \(Self.jsStr(plan)), planUntil: \(Self.jsStr(planUntil)) }; console.log('injected', JSON.stringify(window.__DS_DATA__).slice(0, 300)); renderDashboard();"
+        let q5 = (balance?["q5Pct"] as? NSNumber)?.intValue ?? -1
+        let qw = (balance?["qwPct"] as? NSNumber)?.intValue ?? -1
+        let js = "window.__DS_DATA__ = { sign: \(Self.jsStr(sign)), current: \(Self.jsStr(total)), topped: \(Self.jsStr(topped)), entries: \(entries), accent: \(Self.jsStr(accent)), lang: \(Self.jsStr(lang)), provider: \(Self.jsStr(provider)), plan: \(Self.jsStr(plan)), planUntil: \(Self.jsStr(planUntil)), q5Pct: \(q5 >= 0 ? String(q5) : "null"), qwPct: \(qw >= 0 ? String(qw) : "null") }; console.log('injected', JSON.stringify(window.__DS_DATA__).slice(0, 300)); renderDashboard();"
         webView?.evaluateJavaScript(js, completionHandler: nil)
     }
 

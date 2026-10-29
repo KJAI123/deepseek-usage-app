@@ -119,7 +119,7 @@
 
 <script>
 const DEFAULT_CFG = { cards: ["cur","today","cum","topup","days","max","left"], mode: "balance" };
-const ALL_CARDS = ["cur","today","cum","topup","days","max","left","plan","planEnd"];
+const ALL_CARDS = ["q5","qw","plan","planEnd","cur","today","cum","topup","days","max","left"];
 
 /* ---------- 本地化（zh / en） ---------- */
 const I18N = {
@@ -131,7 +131,8 @@ const I18N = {
   "余额趋势": "Balance", "每日使用量": "Daily Usage", "余额 + 使用量对比": "Balance + Usage",
   "保存": "Save", "取消": "Cancel", "天": "d",
   "余额": "Balance", "使用量": "Usage", "余额: ": "Balance: ", "使用量: ": "Usage: ",
-  "套餐": "Plan", "套餐到期": "Plan Expiry", "无套餐": "No plan"
+  "套餐": "Plan", "套餐到期": "Plan Expiry", "无套餐": "No plan",
+  "5 小时额度": "5-hour quota", "本周额度": "Weekly quota"
 };
 function T(key, lang) {
   const l = lang || ((window.__DS_DATA__ && window.__DS_DATA__.lang) || "zh");
@@ -188,10 +189,29 @@ function fetchData(cb) {
   cb({ sign: "¥", current: "", entries: [] });
 }
 
+// 勾选框标题跟随数据源：智谱时余额/今日/累计 实际展示的是额度与套餐
+function syncCardLabels() {
+  const D = window.__DS_DATA__ || {};
+  const zp = D.provider === "zhipu";
+  const map = zp
+    ? { cur: "5 小时额度", today: "本周额度", cum: "套餐" }
+    : { cur: "当前余额", today: "今日消耗", cum: "累计消耗" };
+  const labels = document.querySelectorAll("#cfgPanel label");
+  Array.prototype.forEach.call(labels, function (l) {
+    const cb = l.querySelector("input[data-card]");
+    const sp = l.querySelector("span[data-i18n]");
+    if (!cb || !sp) return;
+    const k = map[cb.dataset.card] || sp.getAttribute("data-i18n");
+    sp.setAttribute("data-i18n", k);
+    sp.textContent = T(k, D.lang);
+  });
+}
+
 function boot() {
   fetchData(function (D) {
     window.__DS_DATA__ = D;
     renderDashboard();
+    syncCardLabels();
   });
 }
 
@@ -278,13 +298,18 @@ function renderCards(D) {
 
   // 智谱：没有"今日消耗/累计消耗/充值/预估可用"口径，这些卡片换成就「套餐 / 套餐到期」
   if (isZhipu) {
+    const rem5 = typeof D.q5Pct === "number" ? Math.max(0, 100 - D.q5Pct) : null;
+    const remW = typeof D.qwPct === "number" ? Math.max(0, 100 - D.qwPct) : null;
+    data.q5 = { label: T("5 小时额度", lang), cls: rem5 === 0 ? "warn" : "bal", text: rem5 === null ? "—" : rem5 + "%" };
+    data.qw = { label: T("本周额度", lang), cls: remW === 0 ? "warn" : "use", text: remW === null ? "—" : remW + "%" };
     data.plan = { label: T("套餐", lang), cls: "bal", text: D.plan ? D.plan : T("无套餐", lang) };
     data.planEnd = { label: T("套餐到期", lang), cls: "bal", text: D.planUntil ? D.planUntil : "—" };
   }
   const cardKeys = cfg.cards.map(k => {
     if (!isZhipu) return k;
-    if (k === "today") return "plan";
-    if (k === "cum") return "planEnd";
+    if (k === "cur") return "q5";
+    if (k === "today") return "qw";
+    if (k === "cum") return "plan";
     if (k === "topup" || k === "left") return null;
     if (k === "days" || k === "max") return null;   // 记录天数 / 区间最高 对智谱无口径
     return k;
@@ -309,6 +334,13 @@ function renderDashboard() {
   }
   applyLang(D.lang);
   renderCards(D);
+  // 智谱只有套餐额度、没有余额历史，不画余额曲线
+  const chartEl = document.getElementById("chart");
+  if (D.provider === "zhipu") {
+    if (chartEl) chartEl.style.display = "none";
+    return;
+  }
+  if (chartEl) chartEl.style.display = "";
   drawChart(D, (D.entries || []).slice());
 }
 

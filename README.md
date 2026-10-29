@@ -49,12 +49,11 @@ The app reads your balance with a DeepSeek **API Key**. Your key never leaves yo
 
 In **Settings → Data Source**, choose **Zhipu AI (GLM)** and paste a Zhipu API Key (`id.secret`, created at [bigmodel.cn](https://bigmodel.cn/usercenter/proj-mgmt/apikeys)). The panel then shows:
 
-- **Available balance** (cash + grants, CNY) from the finance overview
+- **5-hour quota** and **weekly quota**: remaining percentage for your Coding Plan, read from `/api/monitor/usage/quota/limit`
 - **Plan** name and **plan expiry** (e.g. `GLM Coding Lite` / `2027-03-07`) from your active subscription
+- Cash **balance** in the footer (usually 0 while a plan is active)
 
-Accounts are isolated: each account keeps its own balance history, so switching between DeepSeek and Zhipu never produces a fake "usage" spike.
-
-> Note: Zhipu does not expose per-plan credit consumption (the 5-hour / weekly quota) through its API — that endpoint is blocked by the gateway. The app shows plan status and expiry instead of guessing a quota number.
+Quota colours follow the usual convention: red at 0% left, orange below 10%. Accounts are isolated: each account keeps its own history, so switching between DeepSeek and Zhipu never produces a fake "usage" spike.
 
 ### macOS (macOS 13+)
 

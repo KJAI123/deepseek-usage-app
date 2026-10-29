@@ -286,6 +286,7 @@ function renderCards(D) {
     if (k === "today") return "plan";
     if (k === "cum") return "planEnd";
     if (k === "topup" || k === "left") return null;
+    if (k === "days" || k === "max") return null;   // 记录天数 / 区间最高 对智谱无口径
     return k;
   }).filter(k => k !== null);
   const visible = ALL_CARDS.filter(k => cardKeys.indexOf(k) >= 0 && data[k]);
@@ -294,7 +295,8 @@ function renderCards(D) {
   let html = "";
   visible.forEach(k => {
     const c = data[k];
-    html += '<div class="card"><div class="label">' + c.label + '</div><div class="value ' + c.cls + '">' + c.text + '</div></div>';
+    const sizeCls = c.text.length > 12 ? ' small' : (c.text.length > 9 ? ' mid' : '');
+    html += '<div class="card"><div class="label">' + c.label + '</div><div class="value ' + c.cls + sizeCls + '">' + c.text + '</div></div>';
   });
   statsEl.innerHTML = html;
   return { todayUsage: todayUsage, cumUsage: cumUsage, dayCount: dayCount, maxV: maxV, topup: topup };

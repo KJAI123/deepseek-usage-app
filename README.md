@@ -53,7 +53,19 @@ In **Settings → Data Source**, choose **Zhipu AI (GLM)** and paste a Zhipu API
 - **Plan** name and **plan expiry** (e.g. `GLM Coding Lite` / `2027-03-07`) from your active subscription
 - Cash **balance** in the footer (usually 0 while a plan is active)
 
-Quota colours follow the usual convention: red at 0% left, orange below 10%. Accounts are isolated: each account keeps its own history, so switching between DeepSeek and Zhipu never produces a fake "usage" spike.
+Quota colours follow the usual convention: red at 0% left, orange below 10%.
+
+### Using DeepSeek and Zhipu at the same time
+
+When more than one account is configured, the panel shows them **side by side** instead of forcing you to switch:
+
+| Mode | Layout |
+|---|---|
+| Standard | Main account on top (three rows), secondary account below its own divider line |
+| Mini | Main account only, with a one-line summary of the secondary account in the top-right |
+| Dashboard | Six cards in two rows: three for the main account, three for the secondary |
+
+The main account is whichever one is selected in Settings; the secondary is the first account with a *different* provider. Each account keeps its own balance cache (`balance-<provider>-<index>.json`) and its own history, so the two never overwrite each other. Accounts are isolated: each account keeps its own history, so switching between DeepSeek and Zhipu never produces a fake "usage" spike.
 
 ### macOS (macOS 13+)
 

@@ -86,7 +86,8 @@ enum SharedStore {
     }
 
     /// 写余额缓存（供小组件读取）；rate 为显示货币换算系数（CNY=1.0，USD≈1/7.2）
-    static func writeBalance(_ b: AccountBalance, sign: String, rate: Double = 1.0) {
+    /// tag 非空时额外写一份 `balance-<tag>.json`，用于并列显示副账号
+    static func writeBalance(_ b: AccountBalance, sign: String, rate: Double = 1.0, tag: String? = nil) {
         let payload: [String: Any] = [
             "total": b.total,
             "sign": sign,
@@ -108,11 +109,27 @@ enum SharedStore {
             "qwReset": b.quotaWeekReset ?? "",
             "updatedAt": Date().timeIntervalSince1970,
         ]
+        // 只有当前账号才写主缓存（balance.json 被小组件/网页看板读取）；
+        // 副账号只写自己的 balance-<tag>.json，避免覆盖主账号数据
+        if let tag = tag, !tag.isEmpty {
+            write(balanceFileName(tag), payload)
+            if tag != currentAccountTag() { return }
+        }
         write("balance.json", payload)
+    }
+
+    static func balanceFileName(_ tag: String) -> String {
+        "balance-" + tag.replacingOccurrences(of: "#", with: "-") + ".json"
     }
 
     /// 读余额缓存（看板/小组件共用）
     static func readBalance() -> [String: Any]? { read("balance.json") }
+
+    /// 读指定账号的余额缓存（并列显示用）
+    static func readBalance(tag: String) -> [String: Any]? { read(balanceFileName(tag)) }
+
+    /// 某账号的 tag（与 appendHistory 口径一致）
+    static func tag(for index: Int, provider: String) -> String { "\(provider)#\(index)" }
 
     /// API Key 读取：优先当前账号，兜底共享配置/旧钥匙串
     static func apiKey() -> String? {
@@ -193,6 +210,41 @@ enum SharedStore {
         set("accounts", list)
         set("accountIndex", list.count - 1)
     }
+    /// 并列显示用：返回副账号（优先不同 provider 的账号，其次任意其它账号）
+    static func secondaryAccountIndex() -> Int? {
+        let list = accounts()
+        guard list.count > 1 else { return nil }
+        let main = accountIndex()
+        let mainProvider = currentProvider()
+        // 1) 先找 provider 不同的账号
+        for (i, a) in list.enumerated() where i != main {
+            let p = a["provider"] as? String ?? providerDeepSeek
+            if p != mainProvider { return i }
+        }
+        // 2) 否则取相邻账号
+        return main == 0 ? 1 : 0
+    }
+
+    static func account(at index: Int) -> [String: Any]? {
+        let list = accounts()
+        return index >= 0 && index < list.count ? list[index] : nil
+    }
+
+    static func provider(of index: Int) -> String {
+        account(at: index)?["provider"] as? String ?? providerDeepSeek
+    }
+
+    static func key(of index: Int) -> String? {
+        let k = account(at: index)?["key"] as? String ?? ""
+        return k.isEmpty ? nil : k
+    }
+
+    /// 是否启用并列显示（config: sideBySide，默认开）
+    static func sideBySideEnabled() -> Bool {
+        if let v = get("sideBySide") as? Bool { return v }
+        return true
+    }
+
     static func removeCurrentAccount() {
         var list = accounts()
         guard !list.isEmpty else { return }
@@ -774,6 +826,11 @@ final class FloatingPanel: NSPanel {
         set { SharedStore.set("alwaysOnTop", newValue) }
     }
     private var isMini: Bool { displayMode == 0 }
+
+    /// 是否显示副账号（并列）：需要有第二个账号且未关闭
+    private var sideBySide: Bool {
+        SharedStore.sideBySideEnabled() && SharedStore.secondaryAccountIndex() != nil
+    }
     private var isDashboard: Bool { displayMode == 2 }
     private var opacity: Double {                    // 面板透明度 0.5~1.0
         get { SharedStore.get("opacity") as? Double ?? 1.0 }
@@ -821,6 +878,16 @@ final class FloatingPanel: NSPanel {
     private var settingsButton: NSButton!
     private var quitButton: NSButton!
     private var pinButton: NSButton!
+    // 并列显示：副账号区块
+    private var subTitleLabel: DragLabel!
+    private var subStatusDot: DragView!
+    private var subTotalLabel: DragLabel!
+    private var subTotalValue: DragLabel!
+    private var subGrantedLabel: DragLabel!
+    private var subGrantedValue: DragLabel!
+    private var subToppedLabel: DragLabel!
+    private var subToppedValue: DragLabel!
+    private var subMiniLabel: DragLabel!       // 极简模式下副账号的一行摘要
 
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
@@ -831,11 +898,13 @@ final class FloatingPanel: NSPanel {
         let h: CGFloat
         switch mode {
         case 0: h = 88
-        case 1: h = 228
+        case 1: h = SharedStore.secondaryAccountIndex() != nil && SharedStore.sideBySideEnabled() ? 334 : 228
         default:
             let cardCount = (SharedStore.get("dashCards") as? [Int] ?? [0, 1, 2, 3, 4, 5]).count
-            let singleRow = cardCount <= 3
-            h = hasChart ? (singleRow ? 208 : 250) : (singleRow ? 118 : 176)
+            let side = SharedStore.secondaryAccountIndex() != nil && SharedStore.sideBySideEnabled()
+            let singleRow = cardCount <= 3 && !side
+            let chart = hasChart && SharedStore.currentProvider() != SharedStore.providerZhipu
+            h = chart ? (singleRow ? 208 : 250) : (singleRow ? 118 : 176)
         }
         let w: CGFloat = mode == 2 ? 320 : (mode == 0 ? 300 : 320)
         super.init(contentRect: NSRect(x: 0, y: 0, width: w, height: h),
@@ -869,10 +938,24 @@ final class FloatingPanel: NSPanel {
     }
 
     /// 看板卡片行数（≤3 张 1 行，否则 2 行）→ 面板自适应高度
-    private func dashboardRows() -> Int { dashCards.count <= 3 ? 1 : 2 }
+    /// 副账号在看板里的三张卡（标签唯一，供布局与更新共用）
+    private func secondaryCardSpecs() -> [(Int, String)] {
+        guard sideBySide, let idx = SharedStore.secondaryAccountIndex() else { return [] }
+        if SharedStore.provider(of: idx) == SharedStore.providerZhipu {
+            return [(6, "智谱 5h"), (7, "智谱 本周"), (8, "智谱 套餐")]
+        }
+        return [(6, "DeepSeek 余额"), (7, "DeepSeek 赠送"), (8, "DeepSeek 充值")]
+    }
+
+    private func dashboardRows() -> Int {
+        let base = dashCards.count <= 3 ? 1 : 2
+        if sideBySide && !secondaryCardSpecs().isEmpty { return 2 }
+        return base
+    }
     private func dashboardHeight() -> CGFloat {
         let twoRows = dashboardRows() == 2
-        if showChart { return twoRows ? 250 : 208 }
+        let chart = showChart && SharedStore.currentProvider() != SharedStore.providerZhipu
+        if chart { return twoRows ? 250 : 208 }
         return twoRows ? 176 : 118
     }
 
@@ -903,7 +986,7 @@ final class FloatingPanel: NSPanel {
         chartView = nil
         rangeControl = nil
         let w: CGFloat = isDashboard ? 320 : (isMini ? 300 : 320)
-        let h: CGFloat = isDashboard ? dashboardHeight() : (isMini ? 88 : 228)
+        let h: CGFloat = isDashboard ? dashboardHeight() : (isMini ? 88 : (sideBySide ? 334 : 228))
         setContentSize(NSSize(width: w, height: h))
         alphaValue = CGFloat(opacity)
         buildUI()
@@ -957,7 +1040,8 @@ final class FloatingPanel: NSPanel {
         content.addSubview(effect)
 
         // 标题 + 时间范围（分段控件）+ 置顶开关——坐标随卡片行数/曲线开关自适应（紧凑版）
-        let hasChart = showChart
+        // 智谱只有额度、没有余额历史，因此不占曲线空间
+        let hasChart = showChart && SharedStore.currentProvider() != SharedStore.providerZhipu
         let twoRows = dashboardRows() == 2
         let titleY: CGFloat = hasChart ? (twoRows ? 220 : 180) : (twoRows ? 158 : 92)
         let segY: CGFloat = hasChart ? (twoRows ? 216 : 176) : (twoRows ? 152 : 88)
@@ -1008,11 +1092,15 @@ final class FloatingPanel: NSPanel {
         } else {
             specs = allSpecs.filter { dashCards.contains($0.0) }
         }
-        let cols = min(3, max(1, specs.count))
+        // 并列：主账号三卡在上面一行，副账号三卡在下面一行
+        let subSpecs = secondaryCardSpecs()
+        let mainCount = specs.count
+        if !subSpecs.isEmpty { specs += subSpecs }
+        let cols = min(3, max(1, mainCount))
         let cardW: CGFloat = (content.bounds.width - 24 - CGFloat(cols - 1) * 8) / CGFloat(cols)
         // 智谱单行三卡（余额 / 套餐 / 到期）按内容宽度分配：套餐名最长，给更多空间
         var customXs: [CGFloat] = [], customWs: [CGFloat] = []
-        if isZhipu && specs.count == 3 {
+        if isZhipu && mainCount == 3 {
             let total = content.bounds.width - 24 - 2 * 8
             let w0 = total * 0.22, w1 = total * 0.24
             let w2 = total - w0 - w1
@@ -1021,8 +1109,10 @@ final class FloatingPanel: NSPanel {
         }
         for (i, spec) in specs.enumerated() {
             let col = i % cols, row = i / cols
-            let x = customXs.isEmpty ? 12 + CGFloat(col) * (cardW + 8) : customXs[i]
-            let w = customWs.isEmpty ? cardW : customWs[i]
+            // 主卡行按内容宽度分配；副卡行（并列第二行）用等宽三列
+            let useCustom = !customXs.isEmpty && row == 0
+            let x = useCustom ? customXs[col] : 12 + CGFloat(col) * (cardW + 8)
+            let w = useCustom ? customWs[col] : cardW
             let labelY: CGFloat = row == 0 ? row1LabelY : row2LabelY
             let valY: CGFloat = row == 0 ? row1ValY : row2ValY
             let label = DragLabel(labelWithString: L.t(spec.1))
@@ -1031,7 +1121,7 @@ final class FloatingPanel: NSPanel {
             label.frame = NSRect(x: x, y: labelY, width: w, height: 12)
             content.addSubview(label)
             let val = DragLabel(labelWithString: "—")
-            let isText = spec.0 >= 6 || spec.1 == "套餐"   // 套餐名是文字，字号略小以免被截断
+            let isText = spec.1 == "套餐" || spec.1.hasSuffix("套餐")   // 套餐名是文字，字号略小以免被截断
             val.font = isText ? .systemFont(ofSize: 11.5, weight: .semibold)
                               : .monospacedDigitSystemFont(ofSize: 15, weight: .semibold)
             val.textColor = spec.1 == "当前余额" ? accentColor : .labelColor
@@ -1117,6 +1207,42 @@ final class FloatingPanel: NSPanel {
             if let r = remW { dashboardValues["本周额度"]?.textColor = r == 0 ? .systemRed : (r < 10 ? .systemOrange : .labelColor) }
         }
 
+        // 副账号卡片（并列第二行）：数据来自 balance-<tag>.json
+        if let idx = SharedStore.secondaryAccountIndex(), sideBySide {
+            let provider = SharedStore.provider(of: idx)
+            let sb = SharedStore.readBalance(tag: SharedStore.tag(for: idx, provider: provider))
+            let ssign = sb?["sign"] as? String ?? "¥"
+            let srate = sb?["rate"] as? Double ?? 1.0
+            if provider == SharedStore.providerZhipu {
+                let q5 = (sb?["q5Pct"] as? NSNumber)?.intValue
+                let qw = (sb?["qwPct"] as? NSNumber)?.intValue
+                let rem5 = q5.map { max(0, 100 - $0) }
+                let remW = qw.map { max(0, 100 - $0) }
+                dashboardValues["智谱 5h"]?.stringValue = rem5.map { String($0) + "%" } ?? "—"
+                dashboardValues["智谱 本周"]?.stringValue = remW.map { String($0) + "%" } ?? "—"
+                let plan = sb?["plan"] as? String ?? ""
+                dashboardValues["智谱 套餐"]?.stringValue = plan.isEmpty ? L.t("无套餐") : plan
+                if let r = rem5 { dashboardValues["智谱 5h"]?.textColor = r == 0 ? .systemRed : (r < 10 ? .systemOrange : .labelColor) }
+                if let r = remW { dashboardValues["智谱 本周"]?.textColor = r == 0 ? .systemRed : (r < 10 ? .systemOrange : .labelColor) }
+            } else {
+                let st = Double(sb?["total"] as? String ?? "0") ?? 0
+                dashboardValues["DeepSeek 余额"]?.stringValue = sb == nil ? "—" : fmtMoney(st, sign: ssign, rate: srate)
+                let sg = Double(sb?["granted"] as? String ?? "0") ?? 0
+                let sp2 = Double(sb?["topped"] as? String ?? "0") ?? 0
+                dashboardValues["DeepSeek 赠送"]?.stringValue = sb == nil ? "—" : fmtMoney(sg, sign: ssign, rate: srate)
+                dashboardValues["DeepSeek 充值"]?.stringValue = sb == nil ? "—" : fmtMoney(sp2, sign: ssign, rate: srate)
+                if sb != nil {
+                    dashboardValues["DeepSeek 余额"]?.textColor = st < 5 ? .systemRed : (st < 20 ? .systemOrange : .labelColor)
+                }
+            }
+        }
+
+        // 智谱没有余额历史曲线：直接不画
+        if SharedStore.currentProvider() == SharedStore.providerZhipu {
+            chartView?.setPoints([])
+            return
+        }
+
         // 迷你曲线（按范围过滤）
         let cutoff = dashRange > 0 ? Date().timeIntervalSince1970 - Double(dashRange) * 86400 : 0
         let pts: [(ts: TimeInterval, total: Double)] = entries.compactMap { e in
@@ -1144,6 +1270,16 @@ final class FloatingPanel: NSPanel {
         statusLabel.textColor = .secondaryLabelColor
         statusLabel.frame = NSRect(x: 254, y: 67, width: 70, height: 12)
 
+        // 并列：标题右侧给副账号一行摘要（极简窗口放不下完整第二块）
+        if sideBySide {
+            subMiniLabel = DragLabel(labelWithString: "")
+            subMiniLabel.font = .systemFont(ofSize: 9)
+            subMiniLabel.textColor = .tertiaryLabelColor
+            subMiniLabel.alignment = .right
+            subMiniLabel.frame = NSRect(x: 132, y: 67, width: 104, height: 13)
+            content.addSubview(subMiniLabel)
+        }
+
         // 总余额大字
         totalValue = DragLabel(labelWithString: "—")
         totalValue.font = .monospacedDigitSystemFont(ofSize: 20, weight: .semibold)
@@ -1170,68 +1306,71 @@ final class FloatingPanel: NSPanel {
     }
 
     private func buildFullLayout(_ content: NSView) {
+        // 并列显示时整体上移 106pt，为副账号区块腾出空间
+        let dy: CGFloat = sideBySide ? 106 : 0
+
         titleLabel = DragLabel(labelWithString: panelTitleText())
         titleLabel.font = .systemFont(ofSize: 13, weight: .semibold)
         titleLabel.textColor = .labelColor
-        titleLabel.frame = NSRect(x: 16, y: 196, width: 160, height: 18)
+        titleLabel.frame = NSRect(x: 16, y: 196 + dy, width: 160, height: 18)
 
         statusDot = DragView()
         statusDot.wantsLayer = true
         statusDot.layer?.cornerRadius = 4
         statusDot.layer?.backgroundColor = NSColor.systemGray.cgColor
-        statusDot.frame = NSRect(x: 186, y: 200, width: 8, height: 8)
+        statusDot.frame = NSRect(x: 186, y: 200 + dy, width: 8, height: 8)
 
         statusLabel = DragLabel(labelWithString: L.t("加载中…"))
         statusLabel.font = .systemFont(ofSize: 11)
         statusLabel.textColor = .secondaryLabelColor
         statusLabel.alignment = .right
-        statusLabel.frame = NSRect(x: 198, y: 197, width: 46, height: 14)
+        statusLabel.frame = NSRect(x: 198, y: 197 + dy, width: 46, height: 14)
 
         // 置顶小开关（右上角）
         pinButton = makePinButton()
-        pinButton.frame = NSRect(x: 250, y: 196, width: 18, height: 18)
+        pinButton.frame = NSRect(x: 250, y: 196 + dy, width: 18, height: 18)
         content.addSubview(pinButton)
         updatePinIcon()
 
         let divider = DragView()
         divider.wantsLayer = true
         divider.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.12).cgColor
-        divider.frame = NSRect(x: 16, y: 184, width: 288, height: 1)
+        divider.frame = NSRect(x: 16, y: 184 + dy, width: 288, height: 1)
 
         totalLabel = DragLabel(labelWithString: L.t("总余额"))
         totalLabel.font = .systemFont(ofSize: 11)
         totalLabel.textColor = .secondaryLabelColor
-        totalLabel.frame = NSRect(x: 16, y: 156, width: 80, height: 18)
+        totalLabel.frame = NSRect(x: 16, y: 156 + dy, width: 80, height: 18)
 
         totalValue = DragLabel(labelWithString: "—")
         totalValue.font = .monospacedDigitSystemFont(ofSize: 15, weight: .semibold)
         totalValue.textColor = accentColor
         totalValue.alignment = .right
-        totalValue.frame = NSRect(x: 176, y: 152, width: 124, height: 22)
+        totalValue.frame = NSRect(x: 176, y: 152 + dy, width: 124, height: 22)
 
         let grantedLabel = DragLabel(labelWithString: L.t("赠送余额"))
         grantedLabel.font = .systemFont(ofSize: 11)
         grantedLabel.textColor = .secondaryLabelColor
-        grantedLabel.frame = NSRect(x: 16, y: 128, width: 80, height: 18)
+        grantedLabel.frame = NSRect(x: 16, y: 128 + dy, width: 80, height: 18)
         self.grantedLabel = grantedLabel
 
         grantedValue = DragLabel(labelWithString: "—")
         grantedValue.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
         grantedValue.textColor = .secondaryLabelColor
         grantedValue.alignment = .right
-        grantedValue.frame = NSRect(x: 176, y: 124, width: 124, height: 20)
+        grantedValue.frame = NSRect(x: 176, y: 124 + dy, width: 124, height: 20)
 
         let toppedLabel = DragLabel(labelWithString: L.t("充值余额"))
         toppedLabel.font = .systemFont(ofSize: 11)
         toppedLabel.textColor = .secondaryLabelColor
-        toppedLabel.frame = NSRect(x: 16, y: 100, width: 80, height: 18)
+        toppedLabel.frame = NSRect(x: 16, y: 100 + dy, width: 80, height: 18)
         self.toppedLabel = toppedLabel
 
         toppedValue = DragLabel(labelWithString: "—")
         toppedValue.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
         toppedValue.textColor = .secondaryLabelColor
         toppedValue.alignment = .right
-        toppedValue.frame = NSRect(x: 176, y: 96, width: 124, height: 20)
+        toppedValue.frame = NSRect(x: 176, y: 96 + dy, width: 124, height: 20)
 
         footerLabel = DragLabel(labelWithString: L.t("等待获取…"))
         footerLabel.font = .systemFont(ofSize: 10)
@@ -1245,12 +1384,75 @@ final class FloatingPanel: NSPanel {
         quitButton = makeButton(L.t("隐藏"), action: #selector(hidePanel))
         quitButton.frame = NSRect(x: 254, y: 24, width: 52, height: 24)
 
-        for v in [titleLabel!, statusDot!, statusLabel!, divider,
-                  totalLabel, totalValue!, grantedLabel, grantedValue!,
-                  toppedLabel, toppedValue!, footerLabel!,
-                  refreshButton!, settingsButton!, quitButton!] as [NSView] {
-            content.addSubview(v)
+        var views: [NSView] = [titleLabel!, statusDot!, statusLabel!, divider,
+                               totalLabel, totalValue!, grantedLabel, grantedValue!,
+                               toppedLabel, toppedValue!, footerLabel!,
+                               refreshButton!, settingsButton!, quitButton!]
+
+        // 副账号区块（并列）：小标题 + 状态点 + 三行
+        if sideBySide {
+            let divider2 = DragView()
+            divider2.wantsLayer = true
+            divider2.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.12).cgColor
+            divider2.frame = NSRect(x: 16, y: 192, width: 288, height: 1)
+
+            subTitleLabel = DragLabel(labelWithString: secondaryTitleText())
+            subTitleLabel.font = .systemFont(ofSize: 11, weight: .semibold)
+            subTitleLabel.textColor = .secondaryLabelColor
+            subTitleLabel.frame = NSRect(x: 16, y: 174, width: 200, height: 15)
+
+            subStatusDot = DragView()
+            subStatusDot.wantsLayer = true
+            subStatusDot.layer?.cornerRadius = 3
+            subStatusDot.layer?.backgroundColor = NSColor.systemGray.cgColor
+            subStatusDot.frame = NSRect(x: 296, y: 179, width: 6, height: 6)
+
+            subTotalLabel = DragLabel(labelWithString: "—")
+            subTotalLabel.font = .systemFont(ofSize: 11)
+            subTotalLabel.textColor = .secondaryLabelColor
+            subTotalLabel.frame = NSRect(x: 16, y: 152, width: 80, height: 18)
+
+            subTotalValue = DragLabel(labelWithString: "—")
+            subTotalValue.font = .monospacedDigitSystemFont(ofSize: 13, weight: .semibold)
+            subTotalValue.textColor = .labelColor
+            subTotalValue.alignment = .right
+            subTotalValue.frame = NSRect(x: 176, y: 149, width: 124, height: 20)
+
+            subGrantedLabel = DragLabel(labelWithString: "—")
+            subGrantedLabel.font = .systemFont(ofSize: 11)
+            subGrantedLabel.textColor = .secondaryLabelColor
+            subGrantedLabel.frame = NSRect(x: 16, y: 128, width: 80, height: 18)
+
+            subGrantedValue = DragLabel(labelWithString: "—")
+            subGrantedValue.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
+            subGrantedValue.textColor = .secondaryLabelColor
+            subGrantedValue.alignment = .right
+            subGrantedValue.frame = NSRect(x: 176, y: 125, width: 124, height: 18)
+
+            subToppedLabel = DragLabel(labelWithString: "—")
+            subToppedLabel.font = .systemFont(ofSize: 11)
+            subToppedLabel.textColor = .secondaryLabelColor
+            subToppedLabel.frame = NSRect(x: 16, y: 104, width: 80, height: 18)
+
+            subToppedValue = DragLabel(labelWithString: "—")
+            subToppedValue.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
+            subToppedValue.textColor = .secondaryLabelColor
+            subToppedValue.alignment = .right
+            subToppedValue.frame = NSRect(x: 176, y: 101, width: 124, height: 18)
+
+            views += [divider2, subTitleLabel!, subStatusDot!,
+                      subTotalLabel!, subTotalValue!, subGrantedLabel!, subGrantedValue!,
+                      subToppedLabel!, subToppedValue!]
         }
+
+        for v in views { content.addSubview(v) }
+    }
+
+    /// 副账号小标题：名称 · 数据源
+    private func secondaryTitleText() -> String {
+        guard let idx = SharedStore.secondaryAccountIndex() else { return "" }
+        let name = (SharedStore.account(at: idx)?["name"] as? String) ?? "Account \(idx + 1)"
+        return "\(name) · \(SharedStore.providerLabel(SharedStore.provider(of: idx)))"
     }
 
     private func makeButton(_ title: String, action: Selector) -> NSButton {
@@ -1300,9 +1502,9 @@ final class FloatingPanel: NSPanel {
     }
 
     /// 按 provider 拉取余额：智谱走财务总览+套餐；DeepSeek/网关走 /user/balance
-    private func fetchBalanceForCurrentProvider(key: String,
-                                                completion: @escaping (Result<AccountBalance, Error>) -> Void) {
-        if SharedStore.currentProvider() == SharedStore.providerZhipu {
+    private func fetchBalance(provider: String, key: String,
+                              completion: @escaping (Result<AccountBalance, Error>) -> Void) {
+        if provider == SharedStore.providerZhipu {
             api.fetchZhipu(key: key, completion: completion)
             return
         }
@@ -1313,11 +1515,12 @@ final class FloatingPanel: NSPanel {
     }
 
     @objc func refresh() {
+        refreshSecondary()
         let isZhipu = SharedStore.currentProvider() == SharedStore.providerZhipu
         // 看板模式：不触碰原生控件，仅拉数据 + 更新卡片/曲线
         if isDashboard {
             guard let key = SharedStore.apiKey(), !key.isEmpty else { return }
-            fetchBalanceForCurrentProvider(key: key) { [weak self] result in
+            fetchBalance(provider: SharedStore.currentProvider(), key: key) { [weak self] result in
                 DispatchQueue.main.async {
                     guard let self = self else { return }
                     if case .success(let b) = result {
@@ -1343,7 +1546,7 @@ final class FloatingPanel: NSPanel {
             return
         }
         statusLabel.stringValue = L.t("获取中…")
-        fetchBalanceForCurrentProvider(key: key) { [weak self] result in
+        fetchBalance(provider: SharedStore.currentProvider(), key: key) { [weak self] result in
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 switch result {
@@ -1355,6 +1558,85 @@ final class FloatingPanel: NSPanel {
                     self.updateFooter()
                 }
             }
+        }
+    }
+
+    /// 并列显示：拉取副账号余额（失败只影响副块，不影响主账号）
+    private func refreshSecondary() {
+        guard sideBySide,
+              let idx = SharedStore.secondaryAccountIndex(),
+              let key = SharedStore.key(of: idx) else { return }
+        let provider = SharedStore.provider(of: idx)
+        fetchBalance(provider: provider, key: key) { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                switch result {
+                case .success(let b):
+                    let tag = SharedStore.tag(for: idx, provider: provider)
+                    let spec = self.moneySpec(for: b)
+                    SharedStore.writeBalance(b, sign: spec.sign, rate: spec.rate, tag: tag)
+                    self.applySecondary(b)
+                case .failure(let err):
+                    self.subStatusDot?.layer?.backgroundColor = NSColor.systemRed.cgColor
+                    self.subTotalValue?.stringValue = "—"
+                    self.subGrantedLabel?.stringValue = err.localizedDescription
+                }
+            }
+        }
+    }
+
+    /// 渲染副账号区块（DeepSeek：余额/赠送/充值；智谱：5 小时/本周/套餐）
+    private func applySecondary(_ b: AccountBalance) {
+        guard sideBySide else { return }
+        let spec = moneySpec(for: b)
+        let sign = spec.sign, rate = spec.rate
+        // 极简模式：只写标题右侧一行摘要
+        if isMini {
+            let short = b.provider == SharedStore.providerZhipu ? "智谱" : "DS"
+            if b.provider == SharedStore.providerZhipu {
+                let rem5 = b.quota5Percent.map { max(0, 100 - $0) }
+                let remW = b.quotaWeekPercent.map { max(0, 100 - $0) }
+                subMiniLabel?.stringValue = short + " " + (rem5.map { String($0) + "%" } ?? "—")
+                    + "/" + (remW.map { String($0) + "%" } ?? "—")
+            } else {
+                // 极简窗口窄：只留整数金额，避免和右侧状态文字挤在一起
+                let shown = (Double(b.total) ?? 0) * rate
+                subMiniLabel?.stringValue = short + " " + sign + String(format: "%.0f", shown)
+            }
+            subMiniLabel?.textColor = (b.quotaWeekPercent ?? 0) >= 100 && b.provider == SharedStore.providerZhipu
+                ? .systemRed : .tertiaryLabelColor
+            return
+        }
+        guard subTotalValue != nil else { return }
+        if b.provider == SharedStore.providerZhipu {
+            let rem5 = b.quota5Percent.map { max(0, 100 - $0) }
+            let remW = b.quotaWeekPercent.map { max(0, 100 - $0) }
+            subTotalLabel.stringValue = L.t("5 小时额度")
+            subTotalValue.stringValue = rem5.map { String($0) + "%" } ?? "—"
+            subGrantedLabel.stringValue = L.t("本周额度")
+            subGrantedValue.stringValue = remW.map { String($0) + "%" } ?? "—"
+            subToppedLabel.stringValue = L.t("套餐")
+            subToppedValue.stringValue = b.plan ?? L.t("无套餐")
+            subTotalValue.textColor = rem5 == 0 ? .systemRed : (rem5.map { $0 < 10 } == true ? .systemOrange : .labelColor)
+            subGrantedValue.textColor = remW == 0 ? .systemRed : (remW.map { $0 < 10 } == true ? .systemOrange : .secondaryLabelColor)
+            subToppedValue.textColor = .secondaryLabelColor
+            if let pw = b.quotaWeekPercent, pw >= 100 {
+                subStatusDot.layer?.backgroundColor = NSColor.systemRed.cgColor
+            } else {
+                subStatusDot.layer?.backgroundColor = NSColor.systemGreen.cgColor
+            }
+        } else {
+            subTotalLabel.stringValue = L.t("总余额")
+            subTotalValue.stringValue = fmtMoney(Double(b.total) ?? 0, sign: sign, rate: rate)
+            subGrantedLabel.stringValue = L.t("赠送余额")
+            subGrantedValue.stringValue = b.granted.map { fmtMoney(Double($0) ?? 0, sign: sign, rate: rate) } ?? "—"
+            subToppedLabel.stringValue = L.t("充值余额")
+            subToppedValue.stringValue = b.toppedUp.map { fmtMoney(Double($0) ?? 0, sign: sign, rate: rate) } ?? "—"
+            let shown = (Double(b.total) ?? 0) * rate
+            subTotalValue.textColor = shown < 5 ? .systemRed : (shown < 20 ? .systemOrange : .labelColor)
+            subGrantedValue.textColor = .secondaryLabelColor
+            subToppedValue.textColor = .secondaryLabelColor
+            subStatusDot.layer?.backgroundColor = b.isAvailable ? NSColor.systemGreen.cgColor : NSColor.systemRed.cgColor
         }
     }
 
@@ -1429,7 +1711,8 @@ final class FloatingPanel: NSPanel {
         toppedValue?.textColor = .secondaryLabelColor
 
         lastUpdated = Self.timeFormatter.string(from: Date())
-        SharedStore.writeBalance(b, sign: sign, rate: rate)
+        SharedStore.writeBalance(b, sign: sign, rate: rate,
+                                 tag: SharedStore.currentAccountTag())
         SharedStore.appendHistory(total: b.total)
         checkLowBalance(total: total, sign: sign, provider: b.provider, hasPlan: b.plan != nil)
         updateFooter()
@@ -2266,7 +2549,27 @@ final class DashboardWindow: NSWindow, WKNavigationDelegate, WKScriptMessageHand
         let planUntil = balance?["planUntil"] as? String ?? ""
         let q5 = (balance?["q5Pct"] as? NSNumber)?.intValue ?? -1
         let qw = (balance?["qwPct"] as? NSNumber)?.intValue ?? -1
-        let js = "window.__DS_DATA__ = { sign: \(Self.jsStr(sign)), current: \(Self.jsStr(total)), topped: \(Self.jsStr(topped)), entries: \(entries), accent: \(Self.jsStr(accent)), lang: \(Self.jsStr(lang)), provider: \(Self.jsStr(provider)), plan: \(Self.jsStr(plan)), planUntil: \(Self.jsStr(planUntil)), q5Pct: \(q5 >= 0 ? String(q5) : "null"), qwPct: \(qw >= 0 ? String(qw) : "null") }; console.log('injected', JSON.stringify(window.__DS_DATA__).slice(0, 300)); renderDashboard();"
+        // 并列：把副账号的缓存一并注入，供网页看板渲染第二行卡片
+        var sideJS = "null"
+        if let idx = SharedStore.secondaryAccountIndex(), SharedStore.sideBySideEnabled() {
+            let sp = SharedStore.provider(of: idx)
+            let sb = SharedStore.readBalance(tag: SharedStore.tag(for: idx, provider: sp)) ?? [:]
+            let sdi: [String: Any] = [
+                "provider": sp,
+                "total": sb["total"] as? String ?? "",
+                "granted": sb["granted"] as? String ?? "0",
+                "topped": sb["topped"] as? String ?? "0",
+                "plan": sb["plan"] as? String ?? "",
+                "q5Pct": sb["q5Pct"] as? Int ?? -1,
+                "qwPct": sb["qwPct"] as? Int ?? -1,
+                "name": SharedStore.account(at: idx)?["name"] as? String ?? "Account \(idx + 1)",
+            ]
+            if let d = try? JSONSerialization.data(withJSONObject: sdi),
+               let str = String(data: d, encoding: .utf8) {
+                sideJS = str
+            }
+        }
+        let js = "window.__DS_DATA__ = { sign: \(Self.jsStr(sign)), current: \(Self.jsStr(total)), topped: \(Self.jsStr(topped)), entries: \(entries), accent: \(Self.jsStr(accent)), lang: \(Self.jsStr(lang)), provider: \(Self.jsStr(provider)), plan: \(Self.jsStr(plan)), planUntil: \(Self.jsStr(planUntil)), q5Pct: \(q5 >= 0 ? String(q5) : "null"), qwPct: \(qw >= 0 ? String(qw) : "null"), side: \(sideJS) }; console.log('injected', JSON.stringify(window.__DS_DATA__).slice(0, 300)); renderDashboard();"
         webView?.evaluateJavaScript(js, completionHandler: nil)
     }
 

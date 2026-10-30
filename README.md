@@ -65,7 +65,9 @@ When more than one account is configured, the panel shows them **side by side** 
 | Mini | Main account only, with a one-line summary of the secondary account in the top-right |
 | Dashboard | Six cards in two rows: three for the main account, three for the secondary |
 
-The main account is whichever one is selected in Settings; the secondary is the first account with a *different* provider. Each account keeps its own balance cache (`balance-<provider>-<index>.json`) and its own history, so the two never overwrite each other. Accounts are isolated: each account keeps its own history, so switching between DeepSeek and Zhipu never produces a fake "usage" spike.
+The main account is whichever one is selected in Settings; the secondary is the first account with a *different* provider. Turn side-by-side off in `Settings → Dashboard → Show the other account (side by side)` to show only the selected account.
+
+**Charts follow the account that has balance history.** Zhipu only exposes plan quota (no balance curve), so when the main account is Zhipu the mini chart borrows the secondary DeepSeek account's history and labels it in the top-right corner. The dashboard window also gained an account switch (e.g. `Zhipu | DeepSeek`): click it to see the other account's curve while the cards keep showing both. Each account keeps its own balance cache (`balance-<provider>-<index>.json`) and its own history, so the two never overwrite each other. Accounts are isolated: each account keeps its own history, so switching between DeepSeek and Zhipu never produces a fake "usage" spike.
 
 ### macOS (macOS 13+)
 

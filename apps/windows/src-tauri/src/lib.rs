@@ -188,6 +188,19 @@ fn get_history() -> Vec<serde_json::Value> {
         .collect()
 }
 
+/// 指定数据源的余额历史（看板并列时切到副账号画曲线用）
+#[tauri::command]
+fn history_for(provider: String) -> Vec<serde_json::Value> {
+    let entries: Vec<serde_json::Value> = read_json("history.json").unwrap_or_default();
+    entries
+        .into_iter()
+        .filter(|e| {
+            let acct = e.get("acct").and_then(|v| v.as_str()).unwrap_or("deepseek");
+            acct == provider
+        })
+        .collect()
+}
+
 fn append_history(total: &str, provider: &str) {
     let mut entries: Vec<serde_json::Value> = read_json("history.json").unwrap_or_default();
     let ts = now_ts();
@@ -634,6 +647,7 @@ pub fn run() {
             set_always_on_top,
             get_balance_cached,
             get_history,
+            history_for,
             refresh,
             open_dashboard,
             open_settings

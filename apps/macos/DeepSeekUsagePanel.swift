@@ -225,6 +225,23 @@ enum SharedStore {
         return main == 0 ? 1 : 0
     }
 
+    /// 曲线与历史统计应跟随的账号：并列时优先有余额历史的账号（智谱只有套餐额度，没有余额曲线）
+    static func historyAccountIndex() -> Int {
+        if currentProvider() != providerZhipu { return accountIndex() }
+        // 只有开启并列、且副账号有余额历史时，曲线才借用副账号
+        if sideBySideEnabled(), let s = secondaryAccountIndex(), provider(of: s) != providerZhipu { return s }
+        return accountIndex()
+    }
+
+    static func historyProvider() -> String { provider(of: historyAccountIndex()) }
+
+    /// 指定账号的余额历史（供曲线）
+    static func historyEntries(forAccount index: Int) -> [[String: Any]] {
+        let list = accounts()
+        guard index >= 0 && index < list.count else { return [] }
+        return scopedHistoryEntries(tag: tag(for: index, provider: provider(of: index)))
+    }
+
     static func account(at index: Int) -> [String: Any]? {
         let list = accounts()
         return index >= 0 && index < list.count ? list[index] : nil
@@ -322,8 +339,12 @@ enum SharedStore {
 
     /// 当前账号的余额历史（旧记录没有 acct 字段，视为 DeepSeek 的第一个账号）
     static func scopedHistoryEntries() -> [[String: Any]] {
-        let tag = currentAccountTag()
-        return historyEntries().filter { ($0["acct"] as? String ?? "deepseek#0") == tag }
+        scopedHistoryEntries(tag: currentAccountTag())
+    }
+
+    /// 指定账号的余额历史
+    static func scopedHistoryEntries(tag: String) -> [[String: Any]] {
+        historyEntries().filter { ($0["acct"] as? String ?? "deepseek#0") == tag }
     }
 
     /// 返回当前账号历史 JSON 字符串（供看板注入）
@@ -903,7 +924,7 @@ final class FloatingPanel: NSPanel {
             let cardCount = (SharedStore.get("dashCards") as? [Int] ?? [0, 1, 2, 3, 4, 5]).count
             let side = SharedStore.secondaryAccountIndex() != nil && SharedStore.sideBySideEnabled()
             let singleRow = cardCount <= 3 && !side
-            let chart = hasChart && SharedStore.currentProvider() != SharedStore.providerZhipu
+            let chart = hasChart && SharedStore.historyProvider() != SharedStore.providerZhipu
             h = chart ? (singleRow ? 208 : 250) : (singleRow ? 118 : 176)
         }
         let w: CGFloat = mode == 2 ? 320 : (mode == 0 ? 300 : 320)
@@ -954,7 +975,7 @@ final class FloatingPanel: NSPanel {
     }
     private func dashboardHeight() -> CGFloat {
         let twoRows = dashboardRows() == 2
-        let chart = showChart && SharedStore.currentProvider() != SharedStore.providerZhipu
+        let chart = showChart && SharedStore.historyProvider() != SharedStore.providerZhipu
         if chart { return twoRows ? 250 : 208 }
         return twoRows ? 176 : 118
     }
@@ -1040,8 +1061,8 @@ final class FloatingPanel: NSPanel {
         content.addSubview(effect)
 
         // 标题 + 时间范围（分段控件）+ 置顶开关——坐标随卡片行数/曲线开关自适应（紧凑版）
-        // 智谱只有额度、没有余额历史，因此不占曲线空间
-        let hasChart = showChart && SharedStore.currentProvider() != SharedStore.providerZhipu
+        // 曲线跟随有余额历史的账号（并列时即副账号的 DeepSeek）
+        let hasChart = showChart && SharedStore.historyProvider() != SharedStore.providerZhipu
         let twoRows = dashboardRows() == 2
         let titleY: CGFloat = hasChart ? (twoRows ? 220 : 180) : (twoRows ? 158 : 92)
         let segY: CGFloat = hasChart ? (twoRows ? 216 : 176) : (twoRows ? 152 : 88)
@@ -1152,7 +1173,8 @@ final class FloatingPanel: NSPanel {
     /// 刷新看板卡片与迷你曲线（幂等，随数据更新调用）
     private func updateDashboardUI() {
         guard isDashboard else { return }
-        let entries = SharedStore.scopedHistoryEntries()
+        let histIdx = SharedStore.historyAccountIndex()
+        let entries = SharedStore.historyEntries(forAccount: histIdx)
         let balance = SharedStore.readBalance()
         let total = balance?["total"] as? String ?? "—"
         let sign = balance?["sign"] as? String ?? "¥"
@@ -1237,8 +1259,8 @@ final class FloatingPanel: NSPanel {
             }
         }
 
-        // 智谱没有余额历史曲线：直接不画
-        if SharedStore.currentProvider() == SharedStore.providerZhipu {
+        // 该账号没有余额历史曲线（智谱只有套餐额度）：不画空曲线
+        if SharedStore.provider(of: histIdx) == SharedStore.providerZhipu {
             chartView?.setPoints([])
             return
         }
@@ -1248,6 +1270,10 @@ final class FloatingPanel: NSPanel {
         let pts: [(ts: TimeInterval, total: Double)] = entries.compactMap { e in
             guard let ts = e["ts"] as? Double, ts >= cutoff else { return nil }
             return (ts: ts, total: Double(e["total"] as? String ?? "0") ?? 0)
+        }
+        if SharedStore.sideBySideEnabled() && SharedStore.secondaryAccountIndex() != nil {
+            let name = SharedStore.account(at: histIdx)?["name"] as? String ?? "Account"
+            chartView?.caption = "\(name) · \(SharedStore.provider(of: histIdx) == SharedStore.providerZhipu ? "智谱额度" : "余额")"
         }
         chartView?.setPoints(pts)
     }
@@ -1843,6 +1869,7 @@ final class FloatingPanel: NSPanel {
 final class MiniChartView: NSView {
     var points: [(ts: TimeInterval, total: Double)] = []
     var lineColor: NSColor = .systemTeal
+    var caption: String = ""          // 曲线属于哪个账号（并列时用）
 
     func setPoints(_ p: [(ts: TimeInterval, total: Double)]) {
         points = p
@@ -1903,6 +1930,17 @@ final class MiniChartView: NSView {
         let dot = NSBezierPath(ovalIn: NSRect(x: last.x - 2.5, y: last.y - 2.5, width: 5, height: 5))
         lineColor.setFill()
         dot.fill()
+
+        // 账号标注（并列时区分主/副账号曲线）：右对齐画在最上层
+        if !caption.isEmpty {
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: 9),
+                .foregroundColor: NSColor.secondaryLabelColor
+            ]
+            let size = (caption as NSString).size(withAttributes: attrs)
+            (caption as NSString).draw(at: NSPoint(x: w - size.width - 2, y: h - size.height - 1),
+                                       withAttributes: attrs)
+        }
     }
 }
 
@@ -1935,6 +1973,7 @@ final class SettingsWindow: NSWindow {
     }
     private let dashRangePopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let chartCheck = NSButton(checkboxWithTitle: L.t("显示曲线图"), target: nil, action: nil)
+    private let sideCheck = NSButton(checkboxWithTitle: L.t("同时显示另一个账号（并列）"), target: nil, action: nil)
     private let dashTopCheck = NSButton(checkboxWithTitle: L.t("看板窗口置顶"), target: nil, action: nil)
     // 提醒
     private let lowCheck = NSButton(checkboxWithTitle: L.t("余额低于阈值时发送系统通知"), target: nil, action: nil)
@@ -2272,6 +2311,15 @@ final class SettingsWindow: NSWindow {
         dashTopCheck.state = (SharedStore.get("dashTop") as? Bool ?? true) ? .on : .off
         dashTopCheck.frame = NSRect(x: 20, y: 66, width: 240, height: 22)
         v.addSubview(dashTopCheck)
+
+        // 并列：另一个账号同时显示（无第二账号时置灰）
+        sideCheck.state = SharedStore.sideBySideEnabled() ? .on : .off
+        sideCheck.isEnabled = SharedStore.accounts().count > 1
+        sideCheck.toolTip = L.isEn
+            ? "Both accounts are shown; the secondary one is the first account with a different provider"
+            : "两个账号同时显示；副账号取第一个数据源不同的账号"
+        sideCheck.frame = NSRect(x: 20, y: 20, width: 340, height: 22)
+        v.addSubview(sideCheck)
         return v
     }
 
@@ -2459,6 +2507,7 @@ final class SettingsWindow: NSWindow {
         SharedStore.set("dashRange", dashRangePopup.selectedTag() >= 0 ? dashRangePopup.selectedTag() : 7)
         SharedStore.set("showChart", chartCheck.state == .on)
         SharedStore.set("dashTop", dashTopCheck.state == .on)
+        SharedStore.set("sideBySide", sideCheck.state == .on)
         SharedStore.set("lowBalanceAlert", lowCheck.state == .on)
         let thr = Double(thresholdField.stringValue) ?? 10.0
         SharedStore.set("lowBalanceThreshold", max(0.5, thr))
@@ -2563,6 +2612,7 @@ final class DashboardWindow: NSWindow, WKNavigationDelegate, WKScriptMessageHand
                 "q5Pct": sb["q5Pct"] as? Int ?? -1,
                 "qwPct": sb["qwPct"] as? Int ?? -1,
                 "name": SharedStore.account(at: idx)?["name"] as? String ?? "Account \(idx + 1)",
+                "entries": SharedStore.scopedHistoryEntries(tag: SharedStore.tag(for: idx, provider: sp)),
             ]
             if let d = try? JSONSerialization.data(withJSONObject: sdi),
                let str = String(data: d, encoding: .utf8) {

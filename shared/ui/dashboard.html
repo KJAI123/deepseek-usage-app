@@ -18,6 +18,8 @@
     gap: 12px;
   }
   .topbar { display: flex; align-items: center; gap: 8px; }
+  .accts { display: flex; gap: 4px; background: rgba(255,255,255,0.05); border-radius: 8px; padding: 2px; }
+  .accts .btn { border: none; padding: 4px 10px; font-size: 11px; }
   .range { display: flex; gap: 8px; margin-right: auto; }
   .btn {
     background: rgba(255,255,255,0.07);
@@ -86,6 +88,7 @@
 </head>
 <body>
 <div class="topbar">
+  <div class="accts" id="accts" hidden></div>
   <div class="range">
     <button class="btn active" data-range="7" data-i18n="近 7 天">近 7 天</button>
     <button class="btn" data-range="30" data-i18n="近 30 天">近 30 天</button>
@@ -352,22 +355,70 @@ function renderCards(D) {
   return { todayUsage: todayUsage, cumUsage: cumUsage, dayCount: dayCount, maxV: maxV, topup: topup };
 }
 
+// 并列时的看板账号切换（main / side）：只影响图表，卡片始终两个账号都显示
+let acctSel = (function () {
+  try {
+    const v = localStorage.getItem("ds.acctSel");
+    return (v === "side" || v === "main") ? v : null;   // null = 还没选过，按数据决定
+  } catch (e) { return null; }
+})();
+
+function buildAcctSwitch(D) {
+  const box = document.getElementById("accts");
+  if (!box) return;
+  if (!D.side) { box.hidden = true; box.innerHTML = ""; return; }
+  const mainLabel = D.provider === "zhipu" ? T("智谱", D.lang) : "DeepSeek";
+  const sideLabel = (D.side.provider === "zhipu" ? T("智谱", D.lang) : "DeepSeek");
+  box.hidden = false;
+  box.innerHTML = "";
+  [["main", mainLabel], ["side", sideLabel]].forEach(function (it) {
+    const b = document.createElement("button");
+    b.className = "btn" + (acctSel === it[0] ? " active" : "");
+    b.textContent = it[1];
+    b.addEventListener("click", function () {
+      acctSel = it[0];
+      try { localStorage.setItem("ds.acctSel", acctSel); } catch (e) {}
+      renderDashboard();
+    });
+    box.appendChild(b);
+  });
+}
+
 function renderDashboard() {
   const D = window.__DS_DATA__ || { sign: "¥", current: "", entries: [] };
   if (D.accent) {
     document.documentElement.style.setProperty("--accent", D.accent);
   }
   applyLang(D.lang);
+  // 首次打开：默认停在有余额历史的那个账号（智谱只有额度，没有曲线）
+  if (!acctSel) {
+    acctSel = (D.side && (D.entries || []).length === 0 && (D.side.entries || []).length > 0)
+      ? "side" : "main";
+  }
+  buildAcctSwitch(D);
   renderCards(D);
-  // 智谱只有套餐额度、没有余额历史，不画余额曲线
+  // 并列时按选中的账号画曲线：副账号的历史同样有数据
+  const pick = (acctSel === "side" && D.side) ? D.side : D;
   const chartEl = document.getElementById("chart");
-  if (D.provider === "zhipu") {
+  const hasHistory = pick.provider !== "zhipu" && (pick.entries || []).length > 0;
+  if (!hasHistory) {
+    // 没有余额历史的账号（智谱套餐、或刚接入还没采样）不画空曲线
     if (chartEl) chartEl.style.display = "none";
     return;
   }
   if (chartEl) chartEl.style.display = "";
-  drawChart(D, (D.entries || []).slice());
+  drawChart(Object.assign({}, D, {
+    provider: pick.provider,
+    sign: pick.sign || D.sign,
+    current: pick.total || pick.current || "",
+    entries: pick.entries || []
+  }), (pick.entries || []).slice());
 }
+
+let lastChart = null;
+window.addEventListener("resize", function () {
+  if (lastChart) { try { lastChart.resize(); } catch (e) {} }
+});
 
 function drawChart(D, all) {
   const el = document.getElementById("chart");
@@ -517,7 +568,8 @@ function drawChart(D, all) {
     }), true);
   }
 
-  window.addEventListener("resize", () => chart.resize());
+  lastChart = chart;
+  requestAnimationFrame(() => { try { chart.resize(); } catch (e) {} });
 }
 
 /* ---------- 交互 ---------- */

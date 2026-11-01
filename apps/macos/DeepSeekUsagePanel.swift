@@ -929,7 +929,8 @@ final class FloatingPanel: NSPanel {
             let side = SharedStore.secondaryAccountIndex() != nil && SharedStore.sideBySideEnabled()
             let singleRow = cardCount <= 3 && !side
             let chart = hasChart && SharedStore.historyProvider() != SharedStore.providerZhipu
-            h = chart ? (singleRow ? 208 : 250) : (singleRow ? 118 : 176)
+            // 必须与 dashboardHeight() 保持一致，否则首启窗口会多出一截空白
+            h = chart ? (singleRow ? 208 : 250) : (singleRow ? 118 : 124)
         }
         let w: CGFloat = mode == 2 ? 320 : (mode == 0 ? 300 : 320)
         super.init(contentRect: NSRect(x: 0, y: 0, width: w, height: h),
@@ -981,7 +982,7 @@ final class FloatingPanel: NSPanel {
         let twoRows = dashboardRows() == 2
         let chart = showChart && SharedStore.historyProvider() != SharedStore.providerZhipu
         if chart { return twoRows ? 250 : 208 }
-        return twoRows ? 144 : 118
+        return twoRows ? 124 : 118
     }
 
     /// 置顶小开关（面板右上角）
@@ -1068,17 +1069,17 @@ final class FloatingPanel: NSPanel {
         // 曲线跟随有余额历史的账号（并列时即副账号的 DeepSeek）
         let hasChart = showChart && SharedStore.historyProvider() != SharedStore.providerZhipu
         let twoRows = dashboardRows() == 2
-        let titleY: CGFloat = hasChart ? (twoRows ? 220 : 180) : (twoRows ? 126 : 92)
-        let segY: CGFloat = hasChart ? (twoRows ? 216 : 176) : (twoRows ? 120 : 88)
-        let row1LabelY: CGFloat = hasChart ? (twoRows ? 184 : 150) : (twoRows ? 100 : 48)
-        let row1ValY: CGFloat = hasChart ? (twoRows ? 166 : 132) : (twoRows ? 84 : 26)
-        let row2LabelY: CGFloat = hasChart ? 136 : 54
-        let row2ValY: CGFloat = hasChart ? 118 : 38
+        let titleY: CGFloat = hasChart ? (twoRows ? 220 : 180) : (twoRows ? 106 : 92)
+        let segY: CGFloat = hasChart ? (twoRows ? 216 : 176) : (twoRows ? 100 : 88)
+        let row1LabelY: CGFloat = hasChart ? (twoRows ? 184 : 150) : (twoRows ? 80 : 48)
+        let row1ValY: CGFloat = hasChart ? (twoRows ? 166 : 132) : (twoRows ? 64 : 26)
+        let row2LabelY: CGFloat = hasChart ? 136 : 38
+        let row2ValY: CGFloat = hasChart ? 118 : 22
 
         titleLabel = DragLabel(labelWithString: panelTitleText())
-        titleLabel.font = .systemFont(ofSize: 12, weight: .semibold)
-        titleLabel.textColor = .labelColor
-        titleLabel.frame = NSRect(x: 12, y: titleY, width: 150, height: 16)
+        titleLabel.font = .systemFont(ofSize: 9)
+        titleLabel.textColor = .secondaryLabelColor
+        titleLabel.frame = NSRect(x: 12, y: titleY, width: 150, height: 12)
         content.addSubview(titleLabel)
 
         let seg = NSSegmentedControl(labels: [L.t("7天"), L.t("30天"), L.t("全部")], trackingMode: .selectOne,
@@ -1163,7 +1164,7 @@ final class FloatingPanel: NSPanel {
             let rowDivider = DragView()
             rowDivider.wantsLayer = true
             rowDivider.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.16).cgColor
-            let divY: CGFloat = hasChart ? 110 : 70
+            let divY: CGFloat = hasChart ? 110 : 54
             rowDivider.frame = NSRect(x: 12, y: divY, width: content.bounds.width - 24, height: 1)
             content.addSubview(rowDivider)
         }

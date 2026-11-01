@@ -1270,8 +1270,8 @@ final class FloatingPanel: NSPanel {
             dashboardValues["本周额度"]?.stringValue = remW.map { String($0) + "%" } ?? "—"
             dashboardValues["套餐"]?.stringValue = plan.isEmpty ? L.t("无套餐") : plan
             if let v = dashboardValues["套餐"] { fitFont(v, maxWidth: v.frame.width, base: 10, min: 8.5) }
-            if let r = rem5 { dashboardValues["5 小时额度"]?.textColor = r == 0 ? .systemRed : (r < 10 ? .systemOrange : .labelColor) }
-            if let r = remW { dashboardValues["本周额度"]?.textColor = r == 0 ? .systemRed : (r < 10 ? .systemOrange : .labelColor) }
+            if let r = rem5 { dashboardValues["5 小时额度"]?.textColor = r == 0 ? .systemRed : (r < 10 ? .systemOrange : accentColor) }
+            if let r = remW { dashboardValues["本周额度"]?.textColor = r == 0 ? .systemRed : (r < 10 ? .systemOrange : accentColor) }
         }
 
         // 副账号卡片（并列第二行）：数据来自 balance-<tag>.json

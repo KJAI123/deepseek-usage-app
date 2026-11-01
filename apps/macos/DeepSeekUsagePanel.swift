@@ -386,6 +386,10 @@ enum L {
         "智谱 AI（GLM）": "Zhipu AI (GLM)",
         "智谱 AI": "Zhipu AI",
         "智谱 用量": "Zhipu Usage",
+        "智谱 · 用量": "Zhipu · Usage",
+        "赠送": "Granted",
+        "充值": "Top-up",
+        "DeepSeek · 用量": "DeepSeek · Usage",
         "智谱 用量看板": "Zhipu Dashboard",
         "套餐": "Plan",
         "套餐到期": "Plan Expiry",
@@ -965,7 +969,7 @@ final class FloatingPanel: NSPanel {
         if SharedStore.provider(of: idx) == SharedStore.providerZhipu {
             return [(6, "智谱 5h"), (7, "智谱 本周"), (8, "智谱 套餐")]
         }
-        return [(6, "DeepSeek 余额"), (7, "DeepSeek 赠送"), (8, "DeepSeek 充值")]
+        return [(6, "DeepSeek 余额"), (7, "赠送"), (8, "充值")]
     }
 
     private func dashboardRows() -> Int {
@@ -977,7 +981,7 @@ final class FloatingPanel: NSPanel {
         let twoRows = dashboardRows() == 2
         let chart = showChart && SharedStore.historyProvider() != SharedStore.providerZhipu
         if chart { return twoRows ? 250 : 208 }
-        return twoRows ? 176 : 118
+        return twoRows ? 144 : 118
     }
 
     /// 置顶小开关（面板右上角）
@@ -1064,17 +1068,17 @@ final class FloatingPanel: NSPanel {
         // 曲线跟随有余额历史的账号（并列时即副账号的 DeepSeek）
         let hasChart = showChart && SharedStore.historyProvider() != SharedStore.providerZhipu
         let twoRows = dashboardRows() == 2
-        let titleY: CGFloat = hasChart ? (twoRows ? 220 : 180) : (twoRows ? 158 : 92)
-        let segY: CGFloat = hasChart ? (twoRows ? 216 : 176) : (twoRows ? 152 : 88)
-        let row1LabelY: CGFloat = hasChart ? (twoRows ? 184 : 150) : (twoRows ? 102 : 48)
+        let titleY: CGFloat = hasChart ? (twoRows ? 220 : 180) : (twoRows ? 126 : 92)
+        let segY: CGFloat = hasChart ? (twoRows ? 216 : 176) : (twoRows ? 120 : 88)
+        let row1LabelY: CGFloat = hasChart ? (twoRows ? 184 : 150) : (twoRows ? 100 : 48)
         let row1ValY: CGFloat = hasChart ? (twoRows ? 166 : 132) : (twoRows ? 84 : 26)
         let row2LabelY: CGFloat = hasChart ? 136 : 54
-        let row2ValY: CGFloat = hasChart ? 118 : 36
+        let row2ValY: CGFloat = hasChart ? 118 : 38
 
         titleLabel = DragLabel(labelWithString: panelTitleText())
-        titleLabel.font = .systemFont(ofSize: 10)
-        titleLabel.textColor = .secondaryLabelColor
-        titleLabel.frame = NSRect(x: 12, y: titleY, width: 140, height: 12)
+        titleLabel.font = .systemFont(ofSize: 12, weight: .semibold)
+        titleLabel.textColor = .labelColor
+        titleLabel.frame = NSRect(x: 12, y: titleY, width: 150, height: 16)
         content.addSubview(titleLabel)
 
         let seg = NSSegmentedControl(labels: [L.t("7天"), L.t("30天"), L.t("全部")], trackingMode: .selectOne,
@@ -1119,19 +1123,21 @@ final class FloatingPanel: NSPanel {
         if !subSpecs.isEmpty { specs += subSpecs }
         let cols = min(3, max(1, mainCount))
         let cardW: CGFloat = (content.bounds.width - 24 - CGFloat(cols - 1) * 8) / CGFloat(cols)
-        // 智谱单行三卡（余额 / 套餐 / 到期）按内容宽度分配：套餐名最长，给更多空间
+        // 三卡时按内容分配列宽：智谱给"套餐"列更多空间，DeepSeek 三等分；
+        // 并列的第二行复用同一套列宽，保证两行左边缘严格对齐
         var customXs: [CGFloat] = [], customWs: [CGFloat] = []
-        if isZhipu && mainCount == 3 {
+        if mainCount == 3 {
             let total = content.bounds.width - 24 - 2 * 8
-            let w0 = total * 0.22, w1 = total * 0.24
+            let ratios: [CGFloat] = isZhipu ? [0.30, 0.22, 0.48] : [0.33, 0.33, 0.34]
+            let w0 = total * ratios[0], w1 = total * ratios[1]
             let w2 = total - w0 - w1
             customXs = [12, 12 + w0 + 8, 12 + w0 + 8 + w1 + 8]
             customWs = [w0, w1, w2]
         }
         for (i, spec) in specs.enumerated() {
             let col = i % cols, row = i / cols
-            // 主卡行按内容宽度分配；副卡行（并列第二行）用等宽三列
-            let useCustom = !customXs.isEmpty && row == 0
+            // 主卡行按内容宽度分配；并列的副卡行（第二行）沿用同一套列宽以对齐
+            let useCustom = !customXs.isEmpty && (row == 0 || sideBySide)
             let x = useCustom ? customXs[col] : 12 + CGFloat(col) * (cardW + 8)
             let w = useCustom ? customWs[col] : cardW
             let labelY: CGFloat = row == 0 ? row1LabelY : row2LabelY
@@ -1150,6 +1156,16 @@ final class FloatingPanel: NSPanel {
             val.frame = NSRect(x: x, y: valY, width: w, height: 17)
             content.addSubview(val)
             dashboardValues[spec.1] = val
+        }
+
+        // 两行之间一条淡分隔线：让"主账号 / 副账号"成为两个清晰的块
+        if twoRows && sideBySide {
+            let rowDivider = DragView()
+            rowDivider.wantsLayer = true
+            rowDivider.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.16).cgColor
+            let divY: CGFloat = hasChart ? 110 : 70
+            rowDivider.frame = NSRect(x: 12, y: divY, width: content.bounds.width - 24, height: 1)
+            content.addSubview(rowDivider)
         }
 
         // 迷你余额曲线（可隐藏）
@@ -1251,8 +1267,8 @@ final class FloatingPanel: NSPanel {
                 dashboardValues["DeepSeek 余额"]?.stringValue = sb == nil ? "—" : fmtMoney(st, sign: ssign, rate: srate)
                 let sg = Double(sb?["granted"] as? String ?? "0") ?? 0
                 let sp2 = Double(sb?["topped"] as? String ?? "0") ?? 0
-                dashboardValues["DeepSeek 赠送"]?.stringValue = sb == nil ? "—" : fmtMoney(sg, sign: ssign, rate: srate)
-                dashboardValues["DeepSeek 充值"]?.stringValue = sb == nil ? "—" : fmtMoney(sp2, sign: ssign, rate: srate)
+                dashboardValues["赠送"]?.stringValue = sb == nil ? "—" : fmtMoney(sg, sign: ssign, rate: srate)
+                dashboardValues["充值"]?.stringValue = sb == nil ? "—" : fmtMoney(sp2, sign: ssign, rate: srate)
                 if sb != nil {
                     dashboardValues["DeepSeek 余额"]?.textColor = st < 5 ? .systemRed : (st < 20 ? .systemOrange : .labelColor)
                 }
@@ -1524,7 +1540,7 @@ final class FloatingPanel: NSPanel {
 
     /// 浮窗标题按数据源切换
     private func panelTitleText() -> String {
-        SharedStore.currentProvider() == SharedStore.providerZhipu ? L.t("智谱 用量") : L.t("DeepSeek 用量")
+        SharedStore.currentProvider() == SharedStore.providerZhipu ? L.t("智谱 · 用量") : L.t("DeepSeek · 用量")
     }
 
     /// 按 provider 拉取余额：智谱走财务总览+套餐；DeepSeek/网关走 /user/balance

@@ -930,7 +930,7 @@ final class FloatingPanel: NSPanel {
             let singleRow = cardCount <= 3 && !side
             let chart = hasChart && SharedStore.historyProvider() != SharedStore.providerZhipu
             // 必须与 dashboardHeight() 保持一致，否则首启窗口会多出一截空白
-            h = chart ? (singleRow ? 208 : 250) : (singleRow ? 118 : 124)
+            h = chart ? (singleRow ? 204 : 264) : (singleRow ? 100 : 152)
         }
         let w: CGFloat = mode == 2 ? 320 : (mode == 0 ? 300 : 320)
         super.init(contentRect: NSRect(x: 0, y: 0, width: w, height: h),
@@ -981,8 +981,8 @@ final class FloatingPanel: NSPanel {
     private func dashboardHeight() -> CGFloat {
         let twoRows = dashboardRows() == 2
         let chart = showChart && SharedStore.historyProvider() != SharedStore.providerZhipu
-        if chart { return twoRows ? 250 : 208 }
-        return twoRows ? 124 : 118
+        if chart { return twoRows ? 264 : 204 }
+        return twoRows ? 152 : 100
     }
 
     /// 置顶小开关（面板右上角）
@@ -1065,39 +1065,58 @@ final class FloatingPanel: NSPanel {
         effect.layer?.masksToBounds = true
         content.addSubview(effect)
 
-        // 标题 + 时间范围（分段控件）+ 置顶开关——坐标随卡片行数/曲线开关自适应（紧凑版）
-        // 曲线跟随有余额历史的账号（并列时即副账号的 DeepSeek）
-        let hasChart = showChart && SharedStore.historyProvider() != SharedStore.providerZhipu
+        // 采用 macOS HIG 的 8pt 网格与字号阶梯：
+        //   外边距 16 / 组间距 8 / 行内标签-数值 3
+        //   caption 11（标签）· title 17 semibold（数值）· 等宽三列
+        // 卡片区固定 152pt 贴顶，曲线叠在下方，两种形态共用同一套纵向偏移。
+        let H = content.bounds.height
+        let W = content.bounds.width
+        let pad: CGFloat = 16
         let twoRows = dashboardRows() == 2
-        let titleY: CGFloat = hasChart ? (twoRows ? 220 : 180) : (twoRows ? 106 : 92)
-        let segY: CGFloat = hasChart ? (twoRows ? 216 : 176) : (twoRows ? 100 : 88)
-        let row1LabelY: CGFloat = hasChart ? (twoRows ? 184 : 150) : (twoRows ? 80 : 48)
-        let row1ValY: CGFloat = hasChart ? (twoRows ? 166 : 132) : (twoRows ? 64 : 26)
-        let row2LabelY: CGFloat = hasChart ? 136 : 38
-        let row2ValY: CGFloat = hasChart ? 118 : 22
+        let hasChart = showChart && SharedStore.historyProvider() != SharedStore.providerZhipu
+
+        let captionFont = NSFont.systemFont(ofSize: 11)
+        let valueFont = NSFont.monospacedDigitSystemFont(ofSize: 17, weight: .semibold)
+        let planFont = NSFont.systemFont(ofSize: 10, weight: .medium)
+
+        let titleY = H - 29
+        let segY: CGFloat = H - 31
+        let hair1Y = H - 41
+        let r1LabY = H - 62
+        let r1ValY = H - 85
+        let hair2Y = H - 95
+        let r2LabY = H - 115
+        let r2ValY = H - 138
+
+        let segW: CGFloat = 92
+        let pinS: CGFloat = 18
 
         titleLabel = DragLabel(labelWithString: panelTitleText())
-        titleLabel.font = .systemFont(ofSize: 9)
+        titleLabel.font = captionFont
         titleLabel.textColor = .secondaryLabelColor
-        titleLabel.frame = NSRect(x: 12, y: titleY, width: 150, height: 12)
+        titleLabel.frame = NSRect(x: pad, y: titleY, width: W - pad * 2 - segW - pinS - 14, height: 14)
         content.addSubview(titleLabel)
 
         let seg = NSSegmentedControl(labels: [L.t("7天"), L.t("30天"), L.t("全部")], trackingMode: .selectOne,
                                      target: self, action: #selector(dashRangeChanged))
-        seg.selectedSegment = dashRange == 30 ? 1 : (dashRange == 0 ? 2 : 0)
         seg.segmentStyle = .rounded
+        seg.controlSize = .small
+        seg.font = captionFont
+        seg.selectedSegment = dashRange == 30 ? 1 : (dashRange == 0 ? 2 : 0)
         if #available(macOS 11.0, *) { seg.selectedSegmentBezelColor = accentColor }
-        seg.frame = NSRect(x: 184, y: segY, width: 100, height: 20)
+        seg.frame = NSRect(x: W - pad - pinS - 6 - segW, y: segY, width: segW, height: 18)
         content.addSubview(seg)
         rangeControl = seg
 
-        // 置顶小开关（右上角）
         pinButton = makePinButton()
-        pinButton.frame = NSRect(x: 292, y: segY + 1, width: 18, height: 18)
+        pinButton.frame = NSRect(x: W - pad - pinS, y: segY, width: pinS, height: pinS)
         content.addSubview(pinButton)
         updatePinIcon()
 
-        // 卡片（按用户勾选显示；最多 6 张，3 列）
+        // 标题与内容之间一条系统分隔线
+        dividerLine(x: pad, y: hair1Y, width: W - pad * 2, content: content)
+
+        // 卡片（按用户勾选显示；最多 6 张，两行各三列，等宽对齐）
         let allSpecs: [(Int, String)] = [
             (0, "当前余额"), (1, "今日消耗"), (2, "累计消耗"),
             (3, "累计充值"), (4, "记录天数"), (5, "区间最高")
@@ -1105,7 +1124,6 @@ final class FloatingPanel: NSPanel {
         let isZhipu = SharedStore.currentProvider() == SharedStore.providerZhipu
         var specs: [(Int, String)]
         if isZhipu {
-            // 智谱没有"今日/累计消耗/充值/预估可用"的口径，用套餐信息占位，卡片数量不变
             specs = allSpecs.filter { dashCards.contains($0.0) }.map { spec -> (Int, String) in
                 switch spec.0 {
                 case 0: return (0, "5 小时额度")
@@ -1118,66 +1136,75 @@ final class FloatingPanel: NSPanel {
         } else {
             specs = allSpecs.filter { dashCards.contains($0.0) }
         }
-        // 并列：主账号三卡在上面一行，副账号三卡在下面一行
         let subSpecs = secondaryCardSpecs()
         let mainCount = specs.count
         if !subSpecs.isEmpty { specs += subSpecs }
+
         let cols = min(3, max(1, mainCount))
-        let cardW: CGFloat = (content.bounds.width - 24 - CGFloat(cols - 1) * 8) / CGFloat(cols)
-        // 三卡时按内容分配列宽：智谱给"套餐"列更多空间，DeepSeek 三等分；
-        // 并列的第二行复用同一套列宽，保证两行左边缘严格对齐
-        var customXs: [CGFloat] = [], customWs: [CGFloat] = []
-        if mainCount == 3 {
-            let total = content.bounds.width - 24 - 2 * 8
-            let ratios: [CGFloat] = isZhipu ? [0.30, 0.22, 0.48] : [0.33, 0.33, 0.34]
-            let w0 = total * ratios[0], w1 = total * ratios[1]
-            let w2 = total - w0 - w1
-            customXs = [12, 12 + w0 + 8, 12 + w0 + 8 + w1 + 8]
-            customWs = [w0, w1, w2]
+        let gap: CGFloat = 8
+        let usable = W - pad * 2 - CGFloat(cols - 1) * gap
+        // 三列按 32/22/46 分配：套餐名最长需要横向空间，两行共用同一套列宽，左边缘依旧严格对齐
+        let ratios: [CGFloat] = Array(repeating: 1.0 / CGFloat(cols), count: cols)
+        var colXs: [CGFloat] = [], colWs: [CGFloat] = []
+        var cursor = pad
+        for c in 0..<cols {
+            let w = usable * ratios[c]
+            colXs.append(cursor); colWs.append(w)
+            cursor += w + gap
         }
+
         for (i, spec) in specs.enumerated() {
             let col = i % cols, row = i / cols
-            // 主卡行按内容宽度分配；并列的副卡行（第二行）沿用同一套列宽以对齐
-            let useCustom = !customXs.isEmpty && (row == 0 || sideBySide)
-            let x = useCustom ? customXs[col] : 12 + CGFloat(col) * (cardW + 8)
-            let w = useCustom ? customWs[col] : cardW
-            let labelY: CGFloat = row == 0 ? row1LabelY : row2LabelY
-            let valY: CGFloat = row == 0 ? row1ValY : row2ValY
+            let x = colXs[col]
+            let colW = colWs[col]
+            let labelY: CGFloat = row == 0 ? r1LabY : r2LabY
+            let valY: CGFloat = row == 0 ? r1ValY : r2ValY
             let label = DragLabel(labelWithString: L.t(spec.1))
-            label.font = .systemFont(ofSize: 9)
+            label.font = captionFont
             label.textColor = .secondaryLabelColor
-            label.frame = NSRect(x: x, y: labelY, width: w, height: 12)
+            label.frame = NSRect(x: x, y: labelY, width: colW, height: 14)
             content.addSubview(label)
             let val = DragLabel(labelWithString: "—")
-            let isText = spec.1 == "套餐" || spec.1.hasSuffix("套餐")   // 套餐名是文字，字号略小以免被截断
-            val.font = isText ? .systemFont(ofSize: 11.5, weight: .semibold)
-                              : .monospacedDigitSystemFont(ofSize: 15, weight: .semibold)
+            val.font = spec.1.hasSuffix("套餐") ? planFont : valueFont
             val.textColor = spec.1 == "当前余额" ? accentColor : .labelColor
             val.lineBreakMode = .byTruncatingTail
-            val.frame = NSRect(x: x, y: valY, width: w, height: 17)
+            val.frame = NSRect(x: x, y: valY, width: colW, height: 21)
             content.addSubview(val)
             dashboardValues[spec.1] = val
         }
 
-        // 两行之间一条淡分隔线：让"主账号 / 副账号"成为两个清晰的块
+        // 主账号 / 副账号之间的分隔（两行时才有）
         if twoRows && sideBySide {
-            let rowDivider = DragView()
-            rowDivider.wantsLayer = true
-            rowDivider.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.16).cgColor
-            let divY: CGFloat = hasChart ? 110 : 54
-            rowDivider.frame = NSRect(x: 12, y: divY, width: content.bounds.width - 24, height: 1)
-            content.addSubview(rowDivider)
+            dividerLine(x: pad, y: hair2Y, width: W - pad * 2, content: content)
         }
 
         // 迷你余额曲线（可隐藏）
         if hasChart {
-            let chartH: CGFloat = twoRows ? 100 : 112
-            let chart = MiniChartView(frame: NSRect(x: 12, y: 8, width: content.bounds.width - 24, height: chartH))
+            let chart = MiniChartView(frame: NSRect(x: pad, y: 8, width: W - pad * 2, height: 100))
             chart.autoresizingMask = [.width]
             chart.lineColor = accentColor
             content.addSubview(chart)
             chartView = chart
         }
+    }
+
+    /// 文本按列宽自适应字号（Apple 的 minimumScaleFactor 等价做法）：套餐名这类长文本不截断
+    private func fitFont(_ label: DragLabel, maxWidth: CGFloat, base: CGFloat, min minimum: CGFloat) {
+        var size = base
+        while size > minimum {
+            let w = (label.stringValue as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: size, weight: .medium)]).width
+            if w <= maxWidth { break }
+            size -= 0.5
+        }
+        label.font = .systemFont(ofSize: size, weight: .medium)
+    }
+
+    private func dividerLine(x: CGFloat, y: CGFloat, width: CGFloat, content: NSView) {
+        let line = DragView()
+        line.wantsLayer = true
+        line.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.14).cgColor
+        line.frame = NSRect(x: x, y: y, width: width, height: 1)
+        content.addSubview(line)
     }
 
     @objc private func dashRangeChanged() {
@@ -1242,7 +1269,8 @@ final class FloatingPanel: NSPanel {
             dashboardValues["5 小时额度"]?.stringValue = rem5.map { String($0) + "%" } ?? "—"
             dashboardValues["本周额度"]?.stringValue = remW.map { String($0) + "%" } ?? "—"
             dashboardValues["套餐"]?.stringValue = plan.isEmpty ? L.t("无套餐") : plan
-            if let r = rem5 { dashboardValues["5 小时额度"]?.textColor = r == 0 ? .systemRed : (r < 10 ? .systemOrange : accentColor) }
+            if let v = dashboardValues["套餐"] { fitFont(v, maxWidth: v.frame.width, base: 10, min: 8.5) }
+            if let r = rem5 { dashboardValues["5 小时额度"]?.textColor = r == 0 ? .systemRed : (r < 10 ? .systemOrange : .labelColor) }
             if let r = remW { dashboardValues["本周额度"]?.textColor = r == 0 ? .systemRed : (r < 10 ? .systemOrange : .labelColor) }
         }
 
@@ -1261,6 +1289,7 @@ final class FloatingPanel: NSPanel {
                 dashboardValues["智谱 本周"]?.stringValue = remW.map { String($0) + "%" } ?? "—"
                 let plan = sb?["plan"] as? String ?? ""
                 dashboardValues["智谱 套餐"]?.stringValue = plan.isEmpty ? L.t("无套餐") : plan
+                if let v = dashboardValues["智谱 套餐"] { fitFont(v, maxWidth: v.frame.width, base: 10, min: 8.5) }
                 if let r = rem5 { dashboardValues["智谱 5h"]?.textColor = r == 0 ? .systemRed : (r < 10 ? .systemOrange : .labelColor) }
                 if let r = remW { dashboardValues["智谱 本周"]?.textColor = r == 0 ? .systemRed : (r < 10 ? .systemOrange : .labelColor) }
             } else {

@@ -18,6 +18,7 @@
     gap: 12px;
   }
   .topbar { display: flex; align-items: center; gap: 8px; }
+  .accts::before { content: attr(data-label); font-size: 10.5px; color: #8e8e98; align-self: center; margin-right: 2px; }
   .accts { display: flex; gap: 4px; background: rgba(255,255,255,0.05); border-radius: 8px; padding: 2px; }
   .accts .btn { border: none; padding: 4px 10px; font-size: 11px; }
   .range { display: flex; gap: 8px; margin-right: auto; }
@@ -33,7 +34,15 @@
   }
   .btn:hover { background: rgba(255,255,255,0.13); }
   .btn.active { background: var(--accent, #484851); border-color: var(--accent, #484851); color: #fff; }
-  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  .stats { display: flex; flex-direction: column; gap: 10px; }
+  .group { display: flex; flex-direction: column; gap: 5px; }
+  .group-title { display: flex; align-items: center; gap: 6px; font-size: 10.5px; line-height: 14px; color: #8e8e98; letter-spacing: 0.3px; }
+  .group-title i { width: 6px; height: 6px; border-radius: 3px; background: var(--accent, #63d3c2); display: inline-block; }
+  .group-title.side i { background: #8e8e98; }
+  .group-grid { display: grid; gap: 10px; }
+  [hidden] { display: none !important; }
+  .chart-empty-inner { max-width: 460px; }
+  .chart-empty { flex: 1; min-height: 140px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; color: #7f7f8a; font-size: 12px; line-height: 1.7; text-align: center; }
   .card {
     background: rgba(255,255,255,0.055);
     border: 1px solid rgba(255,255,255,0.09);
@@ -43,6 +52,8 @@
   }
   .card .label { font-size: 11px; color: #9b9ba6; margin-bottom: 4px; }
   .card .value { font-size: 21px; font-weight: 700; letter-spacing: 0.5px; color: #ffffff; }
+  .card .value.mid { font-size: 17px; letter-spacing: 0.2px; }
+  .card .value.small { font-size: 14px; letter-spacing: 0; }
   .card .value.bal { color: var(--accent, #ffffff); }
   .card .value.use { color: #ff9f4a; }
   .card .value.up { color: #5fd97f; }
@@ -53,7 +64,9 @@
   @media (max-width: 440px) {
     body { padding: 8px 10px; gap: 6px; }
     .topbar { flex-wrap: wrap; }
-    .stats { grid-template-columns: repeat(2, 1fr); gap: 6px; }
+    .stats { gap: 6px; }
+    .group { gap: 4px; }
+    .group-grid { grid-template-columns: repeat(2, 1fr); gap: 6px; }
     .card { padding: 6px 9px; min-height: 48px; }
     .card .label { font-size: 10px; margin-bottom: 2px; }
     .card .value { font-size: 15px; }
@@ -97,6 +110,7 @@
   <button class="btn" id="cfgBtn" data-i18n="自定义显示">⚙ 自定义显示</button>
 </div>
 <div class="stats" id="stats"></div>
+<div id="chart-empty" class="chart-empty" hidden></div>
 <div id="chart"></div>
 
 <div class="mask" id="mask" hidden></div>
@@ -136,6 +150,9 @@ const I18N = {
   "余额": "Balance", "使用量": "Usage", "余额: ": "Balance: ", "使用量: ": "Usage: ",
   "套餐": "Plan", "套餐到期": "Plan Expiry", "无套餐": "No plan",
   "5 小时额度": "5-hour quota", "本周额度": "Weekly quota",
+  "智谱 AI": "Zhipu AI", "赠送": "Granted", "充值": "Top-up",
+  "这个账号没有余额曲线（智谱只有套餐额度）": "No balance curve for this account (Zhipu exposes plan quota only)",
+  "点上方": "Switch to", "查看余额曲线": "to see the balance curve", "曲线": "Curve",
   "DeepSeek 余额": "DeepSeek Bal.", "DeepSeek 赠送": "Granted", "DeepSeek 充值": "Topped up",
   "智谱 5h": "GLM 5h", "智谱 本周": "GLM Week", "智谱 套餐": "GLM Plan"
 };
@@ -316,6 +333,8 @@ function renderCards(D) {
     left: { label: T("预估可用", lang), cls: (daysLeft != null && daysLeft < 1) ? "warn" : "bal", text: daysLeft != null ? Math.floor(daysLeft) + " " + T("天", lang) : "—" }
   };
 
+  const pctCls = (v) => v === null ? "bal" : (v <= 0 ? "warn" : (v < 10 ? "use" : "bal"));
+
   // 副账号（并列）：DeepSeek 显示余额/赠送/充值，智谱显示 5h/本周/套餐
   if (D.side) {
     const sd = D.side;
@@ -324,22 +343,22 @@ function renderCards(D) {
     const rem5 = sd.q5Pct >= 0 ? Math.max(0, 100 - sd.q5Pct) : null;
     const remW = sd.qwPct >= 0 ? Math.max(0, 100 - sd.qwPct) : null;
     if (sz) {
-      data.s1 = { label: T("智谱 5h", lang), cls: rem5 === 0 ? "warn" : "bal", text: rem5 === null ? "—" : rem5 + "%" };
-      data.s2 = { label: T("智谱 本周", lang), cls: remW === 0 ? "warn" : "use", text: remW === null ? "—" : remW + "%" };
-      data.s3 = { label: T("智谱 套餐", lang), cls: "bal", text: sd.plan || T("无套餐", lang) };
+      data.s1 = { label: T("5 小时额度", lang), cls: pctCls(rem5), text: rem5 === null ? "—" : rem5 + "%" };
+      data.s2 = { label: T("本周额度", lang), cls: pctCls(remW), text: remW === null ? "—" : remW + "%" };
+      data.s3 = { label: T("套餐", lang), cls: "bal", text: sd.plan || T("无套餐", lang) };
     } else {
-      data.s1 = { label: T("DeepSeek 余额", lang), cls: "bal", text: sd.total ? sign + sd.total : "—" };
-      data.s2 = { label: T("DeepSeek 赠送", lang), cls: "bal", text: sign + (parseFloat(sd.granted) || 0).toFixed(2) };
-      data.s3 = { label: T("DeepSeek 充值", lang), cls: "up", text: "+" + sign + (parseFloat(sd.topped) || 0).toFixed(2) };
+      data.s1 = { label: T("余额", lang), cls: "bal", text: sd.total ? sign + sd.total : "—" };
+      data.s2 = { label: T("赠送", lang), cls: "bal", text: sign + (parseFloat(sd.granted) || 0).toFixed(2) };
+      data.s3 = { label: T("充值", lang), cls: "up", text: "+" + sign + (parseFloat(sd.topped) || 0).toFixed(2) };
     }
   }
 
   // 智谱：没有"今日消耗/累计消耗/充值/预估可用"口径，这些卡片换成就「套餐 / 套餐到期」
   if (isZhipu) {
-    const rem5 = typeof D.q5Pct === "number" ? Math.max(0, 100 - D.q5Pct) : null;
-    const remW = typeof D.qwPct === "number" ? Math.max(0, 100 - D.qwPct) : null;
-    data.q5 = { label: T("5 小时额度", lang), cls: rem5 === 0 ? "warn" : "bal", text: rem5 === null ? "—" : rem5 + "%" };
-    data.qw = { label: T("本周额度", lang), cls: remW === 0 ? "warn" : "use", text: remW === null ? "—" : remW + "%" };
+    const rem5 = (typeof D.q5Pct === "number" && D.q5Pct >= 0) ? Math.max(0, 100 - D.q5Pct) : null;
+    const remW = (typeof D.qwPct === "number" && D.qwPct >= 0) ? Math.max(0, 100 - D.qwPct) : null;
+    data.q5 = { label: T("5 小时额度", lang), cls: pctCls(rem5), text: rem5 === null ? "—" : rem5 + "%" };
+    data.qw = { label: T("本周额度", lang), cls: pctCls(remW), text: remW === null ? "—" : remW + "%" };
     data.plan = { label: T("套餐", lang), cls: "bal", text: D.plan ? D.plan : T("无套餐", lang) };
     data.planEnd = { label: T("套餐到期", lang), cls: "bal", text: D.planUntil ? D.planUntil : "—" };
   }
@@ -356,15 +375,39 @@ function renderCards(D) {
   if (D.side && data.s1) { cardKeys.push("s1", "s2", "s3"); }
   const visible = ALL_CARDS.filter(k => cardKeys.indexOf(k) >= 0 && data[k]);
   const statsEl = document.getElementById("stats");
-  // 卡片较多时用 3 列（两行三张），避免长套餐名被挤成两行
-  const gridCols = visible.length > 4 ? 3 : Math.min(4, Math.max(1, visible.length));
-  statsEl.style.gridTemplateColumns = "repeat(" + gridCols + ", 1fr)";
-  let html = "";
-  visible.forEach(k => {
+
+  const SIDE_KEYS = { s1: 1, s2: 1, s3: 1 };
+  const mainKs = visible.filter(k => !SIDE_KEYS[k]);
+  const sideKs = visible.filter(k => SIDE_KEYS[k]);
+  const cardOf = k => {
     const c = data[k];
     const sizeCls = c.text.length > 12 ? ' small' : (c.text.length > 9 ? ' mid' : '');
-    html += '<div class="card"><div class="label">' + c.label + '</div><div class="value ' + c.cls + sizeCls + '">' + c.text + '</div></div>';
-  });
+    return '<div class="card"><div class="label">' + c.label + '</div><div class="value ' + c.cls + sizeCls + '">' + c.text + '</div></div>';
+  };
+  // 组内固定 3 列，保证两张组都是整齐的两行三卡
+  const groupHTML = (title, keys, cls) => {
+    const cols = Math.min(3, Math.max(1, keys.length));
+    return '<div class="group">'
+      + '<div class="group-title ' + cls + '"><i></i>' + title + '</div>'
+      + '<div class="group-grid" style="grid-template-columns:repeat(' + cols + ',1fr)">'
+      + keys.map(cardOf).join('')
+      + '</div></div>';
+  };
+  const mainName = D.provider === "zhipu"
+    ? T("智谱 AI", lang) + (D.plan ? " · " + D.plan : "")
+    : "DeepSeek" + (D.plan ? " · " + D.plan : "");
+  const sideName = D.side
+    ? (D.side.provider === "zhipu"
+        ? T("智谱 AI", lang) + (D.side.plan ? " · " + D.side.plan : "")
+        : "DeepSeek" + (D.side.plan ? " · " + D.side.plan : ""))
+    : "";
+  let html = "";
+  if (D.side && sideKs.length) {
+    if (mainKs.length) html += groupHTML(mainName, mainKs, "main");
+    html += groupHTML(sideName, sideKs, "side");
+  } else {
+    html += groupHTML("", visible, "main");
+  }
   statsEl.innerHTML = html;
   return { todayUsage: todayUsage, cumUsage: cumUsage, dayCount: dayCount, maxV: maxV, topup: topup };
 }
@@ -384,6 +427,7 @@ function buildAcctSwitch(D) {
   const mainLabel = D.provider === "zhipu" ? T("智谱", D.lang) : "DeepSeek";
   const sideLabel = (D.side.provider === "zhipu" ? T("智谱", D.lang) : "DeepSeek");
   box.hidden = false;
+  box.setAttribute("data-label", T("曲线", D.lang));
   box.innerHTML = "";
   [["main", mainLabel], ["side", sideLabel]].forEach(function (it) {
     const b = document.createElement("button");
@@ -415,11 +459,27 @@ function renderDashboard() {
   const pick = (acctSel === "side" && D.side) ? D.side : D;
   const chartEl = document.getElementById("chart");
   const hasHistory = pick.provider !== "zhipu" && (pick.entries || []).length > 0;
-  if (!hasHistory) {
-    // 没有余额历史的账号（智谱套餐、或刚接入还没采样）不画空曲线
+  const emptyEl = document.getElementById("chart-empty");
+  const showEmpty = (msg) => {
     if (chartEl) chartEl.style.display = "none";
+    if (emptyEl) {
+      emptyEl.hidden = false;
+      // 包一层，避免 flex 把每个行内节点拆成独立一行
+      emptyEl.innerHTML = '<div class="chart-empty-inner">' + msg + '</div>';
+    }
+  };
+  if (!hasHistory) {
+    // 没有余额历史的账号（智谱套餐、或刚接入还没采样）：不留一块空白，给一句去哪看的提示
+    let msg = T("这个账号没有余额曲线（智谱只有套餐额度）", D.lang);
+    if (D.side) {
+      const target = (acctSel === "side") ? (D.provider === "zhipu" ? T("智谱", D.lang) : "DeepSeek")
+                                          : (D.side.provider === "zhipu" ? T("智谱", D.lang) : "DeepSeek");
+      msg += "<br>" + T("点上方", D.lang) + " <b>" + target + "</b> " + T("查看余额曲线", D.lang);
+    }
+    showEmpty(msg);
     return;
   }
+  if (emptyEl) emptyEl.hidden = true;
   if (chartEl) chartEl.style.display = "";
   drawChart(Object.assign({}, D, {
     provider: pick.provider,
